@@ -316,6 +316,10 @@ async def _render_export_now(
     if fade_seconds > 0:
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
+    # libx264 with yuv420p requires even frame dimensions. Some source aspect
+    # ratios produce odd scaled heights (for example 1920x1323), so pad only
+    # when needed to the next even width/height without distorting the image.
+    video_filters.append("pad=ceil(iw/2)*2:ceil(ih/2)*2")
     audio_filters = [f"volume={audio_volume}"]
     if fade_seconds > 0:
         audio_filters.extend([f"afade=t=in:st=0:d={fade_seconds}", f"afade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
@@ -326,7 +330,7 @@ async def _render_export_now(
         "-t", str(clip_duration), "-vf", ",".join(video_filters),
         "-af", ",".join(audio_filters),
         "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
+        "-c:a", "aac", "-b:a", "128k", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output)
     ]
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
