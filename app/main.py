@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -37,10 +38,19 @@ def safe_upload(name: str) -> Path:
     return path
 
 
-def run_command(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+def _run_command_sync(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+async def run_command(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    # Keep CPU-heavy FFmpeg/FFprobe work off the ASGI event loop so /api/health
+    # and other requests can still respond while media is being processed.
     try:
-        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired as exc:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_run_command_sync, args, timeout),
+            timeout=timeout + 2,
+        )
+    except (subprocess.TimeoutExpired, asyncio.TimeoutError) as exc:
         raise HTTPException(status_code=408, detail="Processing took too long for this hosting instance. Try a shorter or smaller source video.") from exc
 
 
@@ -89,7 +99,7 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         await file.close()
 
     # Verify the upload is a readable video, rather than trusting its filename.
-    probe = run_command([
+    probe = await run_command([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=codec_name,width,height,r_frame_rate,duration",
         "-show_entries", "format=duration,format_name", "-of", "json", str(destination)
@@ -127,7 +137,7 @@ async def analyze_video(stored_name: str) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffprobe") or not shutil.which("ffmpeg"):
         raise HTTPException(status_code=503, detail="FFmpeg and FFprobe are required.")
-    probe = run_command([
+    probe = await run_command([
         "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(source)
     ], timeout=30)
     if probe.returncode != 0:
@@ -137,7 +147,7 @@ async def analyze_video(stored_name: str) -> dict:
     audio = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {})
     duration = float(data.get("format", {}).get("duration") or 0)
     # Scene-change candidates are detected by FFmpeg. This is signal analysis, not AI semantic understanding.
-    scene_result = run_command([
+    scene_result = await run_command([
         "ffmpeg", "-hide_banner", "-i", str(source), "-vf",
         "select='gt(scene,0.35)',showinfo", "-an", "-f", "null", "-"
     ], timeout=120)
@@ -173,7 +183,7 @@ async def export_video(
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise HTTPException(status_code=503, detail="FFmpeg and FFprobe are required.")
-    probe = run_command([
+    probe = await run_command([
         "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(source)
     ], timeout=20)
     try:
@@ -205,7 +215,7 @@ async def export_video(
         "-c:v", "libx264", "-preset", preset_speed, "-crf", crf,
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)
     ]
-    result = run_command(command, timeout=240)
+    result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
