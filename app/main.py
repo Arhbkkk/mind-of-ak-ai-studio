@@ -137,7 +137,7 @@ async def analyze_video(stored_name: str) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffprobe") or not shutil.which("ffmpeg"):
         raise HTTPException(status_code=503, detail="FFmpeg and FFprobe are required.")
-    probe = run_command([
+    probe = await run_command([
         "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(source)
     ], timeout=30)
     if probe.returncode != 0:
@@ -183,7 +183,7 @@ async def export_video(
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise HTTPException(status_code=503, detail="FFmpeg and FFprobe are required.")
-    probe = run_command([
+    probe = await run_command([
         "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(source)
     ], timeout=20)
     try:
