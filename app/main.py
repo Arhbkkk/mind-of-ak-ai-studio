@@ -13,14 +13,15 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from app.validation import compare_script_to_transcript, validate_subtitles
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/mind-of-ak-uploads"))
 EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
-MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "50")))
+MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "2048")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "180")))
+MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "300")))
 TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,7 +47,7 @@ def cleanup_old_files() -> None:
 
 cleanup_old_files()
 
-app = FastAPI(title="Mind of AK AI Studio", version="0.2.0")
+app = FastAPI(title="Mind of AK AI Studio", version="0.4.0")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
@@ -90,7 +91,8 @@ async def health() -> dict:
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
-        "pipeline_version": "0.3.0",
+        "pipeline_version": "0.4.0",
+        "validation_endpoint": "/api/validate",
     }
 
 
@@ -164,6 +166,54 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         "frame_rate": stream.get("r_frame_rate"),
     }
 
+
+
+@app.post("/api/validate")
+async def validate_media(stored_name: str = Form(...), script: str = Form(""), srt_file: UploadFile | None = File(None), transcript_text: str = Form("")) -> dict:
+    """Deterministic checks; unperformed AI checks remain explicitly unverified."""
+    source = safe_upload(stored_name)
+    probe = await run_command(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(source)], timeout=30)
+    if probe.returncode != 0:
+        raise HTTPException(status_code=422, detail="Could not inspect source media.")
+    try:
+        metadata = json.loads(probe.stdout)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="Could not parse source media metadata.") from exc
+    streams = metadata.get("streams", [])
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    duration = float(metadata.get("format", {}).get("duration") or 0)
+    if not video or duration <= 0:
+        raise HTTPException(status_code=422, detail="Source must contain a readable video stream and valid duration.")
+    checks = [
+        {"name": "video_stream", "status": "PASS", "detail": "FFprobe found a readable video stream."},
+        {"name": "duration", "status": "PASS" if 45 <= duration <= 300 else "WARNING", "detail": f"Source duration is {duration:.3f} seconds; target is 45–300 seconds."},
+        {"name": "audio_stream", "status": "PASS" if audio else "FAIL", "detail": "Audio stream detected." if audio else "No audio stream detected."},
+        {"name": "image_narration_semantics", "status": "NOT_VERIFIED", "detail": "Image relevance has not been checked by a vision model or human reviewer."},
+        {"name": "rendered_output", "status": "NOT_VERIFIED", "detail": "This endpoint validates source media only, not a rendered output."},
+    ]
+    subtitle_report = None
+    if srt_file is not None and srt_file.filename:
+        if not srt_file.filename.lower().endswith(".srt"):
+            raise HTTPException(status_code=415, detail="Subtitle upload must be an .srt file.")
+        raw = await srt_file.read()
+        await srt_file.close()
+        if len(raw) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="SRT file exceeds 5 MB.")
+        try:
+            subtitle_report = validate_subtitles(raw.decode("utf-8-sig"), duration)
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail="SRT must be UTF-8 encoded.") from exc
+        checks.extend({"name": "subtitle_" + item["name"], "status": item["status"], "detail": item["detail"]} for item in subtitle_report.get("checks", []))
+    else:
+        checks.append({"name": "subtitle_file", "status": "NOT_VERIFIED", "detail": "No SRT file supplied."})
+    transcript_report = compare_script_to_transcript(script, transcript_text)
+    checks.append({"name": "script_audio_comparison", "status": transcript_report["status"], "detail": transcript_report["detail"]})
+    if script.strip() and not transcript_text.strip():
+        checks.append({"name": "speech_recognition", "status": "NOT_VERIFIED", "detail": "ASR is not integrated; this endpoint does not transcribe audio."})
+    statuses = [item["status"] for item in checks]
+    overall = "FAIL" if "FAIL" in statuses else ("WARNING" if "WARNING" in statuses or "NOT_VERIFIED" in statuses else "PASS")
+    return {"ok": True, "overall_status": overall, "export_gate": "BLOCKED" if overall in ("FAIL", "WARNING") else "ELIGIBLE_FOR_REVIEW", "source": {"duration_seconds": round(duration, 3), "width": video.get("width"), "height": video.get("height"), "video_codec": video.get("codec_name"), "audio_present": bool(audio), "audio_codec": audio.get("codec_name") if audio else None}, "checks": checks, "subtitles": subtitle_report, "script_comparison": transcript_report, "important_limit": "No claim of perfect validation: audio transcription, semantic image matching, and post-render audiovisual review remain unverified without dedicated checkers or human review."}
 
 @app.get("/api/analyze/{stored_name}")
 async def analyze_video(stored_name: str) -> dict:
