@@ -366,7 +366,7 @@ async def _render_export_now(
         )
         if fade_seconds > 0:
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
-        command.extend(["-filter_complex", complex_filters, "-map", "[vout]"] if False else ["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
+        command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
     elif framing == "blur" and preset == "original":
         command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
     else:
