@@ -6,4 +6,8 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: MAX_UPLOAD_MB
-        value: "250"
+        value: "50"
+      - key: MAX_SOURCE_DURATION_SECONDS
+        value: "180"
+      - key: TEMP_FILE_MAX_AGE_SECONDS
+        value: "43200"
