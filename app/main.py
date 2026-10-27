@@ -263,7 +263,9 @@ async def analyze_video(stored_name: str) -> dict:
 
 async def _render_export_now(
     stored_name: str = Form(...),
-    preset: Literal["original", "vertical", "square"] = Form("original"),
+    preset: Literal["original", "landscape", "vertical", "square", "social"] = Form("original"),
+    framing: Literal["fit", "fill", "blur"] = Form("blur"),
+    resolution: Literal["720p", "1080p", "1440p", "4k"] = Form("1080p"),
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
@@ -301,21 +303,50 @@ async def _render_export_now(
 
     output_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     output = EXPORT_DIR / output_name
-    framing_filters = {
-        "original": "scale='min(1920,iw)':-2:force_original_aspect_ratio=decrease",
-        "vertical": "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-        "square": "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2",
-    }
+    # Dimensions are fixed even numbers for reliable H.264/yuv420p playback.
+    # "original" uses FFprobe dimensions and caps the long edge at the selected resolution.
+    if preset == "original":
+        source_probe = await run_command([
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", str(source)
+        ], timeout=20)
+        try:
+            source_stream = json.loads(source_probe.stdout)["streams"][0]
+            source_width, source_height = int(source_stream["width"]), int(source_stream["height"])
+        except (ValueError, KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="Could not determine source video dimensions.") from exc
+        long_edge = {"720p": 1280, "1080p": 1920, "1440p": 2560, "4k": 3840}[resolution]
+        scale = min(1.0, long_edge / max(source_width, source_height))
+        target_width = max(2, int(source_width * scale) // 2 * 2)
+        target_height = max(2, int(source_height * scale) // 2 * 2)
+    else:
+        dimensions = {
+            "720p": {"landscape": (1280, 720), "vertical": (720, 1280), "square": (720, 720), "social": (720, 900)},
+            "1080p": {"landscape": (1920, 1080), "vertical": (1080, 1920), "square": (1080, 1080), "social": (1080, 1350)},
+            "1440p": {"landscape": (2560, 1440), "vertical": (1440, 2560), "square": (1440, 1440), "social": (1440, 1800)},
+            "4k": {"landscape": (3840, 2160), "vertical": (2160, 3840), "square": (2160, 2160), "social": (1728, 2160)},
+        }
+        target_width, target_height = dimensions[resolution][preset]
+
+    if framing == "fill":
+        base_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase", f"crop={target_width}:{target_height}"]
+    elif framing == "blur":
+        # Duplicate the source: blurred, cropped background + aspect-preserving foreground.
+        base_filters = []
+    else:
+        base_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black"]
+
     looks = {
         "natural": "eq=contrast=1.02:saturation=1.03:brightness=0",
         "cinematic": "eq=contrast=1.12:saturation=0.88:brightness=-0.015",
         "warm": "eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03",
         "mono": "hue=s=0,eq=contrast=1.08",
     }
-    video_filters = [framing_filters[preset], looks[color_style]]
+    video_filters = base_filters + [looks[color_style]]
     if fade_seconds > 0:
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
+
     audio_filters = [f"volume={audio_volume}"]
     if fade_seconds > 0:
         audio_filters.extend([f"afade=t=in:st=0:d={fade_seconds}", f"afade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
@@ -323,11 +354,28 @@ async def _render_export_now(
     command = [
         "ffmpeg", "-y", "-hide_banner", "-threads", "1", "-filter_threads", "1",
         "-filter_complex_threads", "1", "-ss", str(start_seconds), "-i", str(source),
-        "-t", str(clip_duration), "-vf", ",".join(video_filters),
+        "-t", str(clip_duration),
+    ]
+    if framing == "blur" and preset != "original":
+        complex_filters = (
+            f"[0:v]split=2[bgsrc][fgsrc];"
+            f"[bgsrc]scale={target_width}:{target_height}:force_original_aspect_ratio=increase,"
+            f"crop={target_width}:{target_height},boxblur=24:12[bg];"
+            f"[fgsrc]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,{looks[color_style]}"
+        )
+        if fade_seconds > 0:
+            complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
+        command.extend(["-filter_complex", complex_filters, "-map", "[vout]"] if False else ["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
+    elif framing == "blur" and preset == "original":
+        command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
+    else:
+        command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
+    command.extend([
         "-af", ",".join(audio_filters),
         "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
-    ]
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
+    ])
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
@@ -341,6 +389,10 @@ async def _render_export_now(
         "size_bytes": output.stat().st_size,
         "duration_seconds": round(effective_end - start_seconds, 2),
         "preset": preset,
+        "framing": framing,
+        "resolution": resolution,
+        "output_width": target_width,
+        "output_height": target_height,
         "quality": quality,
         "color_style": color_style,
         "fade_seconds": fade_seconds,
@@ -357,7 +409,9 @@ _EXPORT_JOBS: dict[str, dict] = {}
 @app.post("/api/export")
 async def start_export(
     stored_name: str = Form(...),
-    preset: Literal["original", "vertical", "square"] = Form("original"),
+    preset: Literal["original", "landscape", "vertical", "square", "social"] = Form("original"),
+    framing: Literal["fit", "fill", "blur"] = Form("blur"),
+    resolution: Literal["720p", "1080p", "1440p", "4k"] = Form("1080p"),
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
@@ -376,6 +430,8 @@ async def start_export(
             result = await _render_export_now(
                 stored_name=stored_name,
                 preset=preset,
+                framing=framing,
+                resolution=resolution,
                 quality=quality,
                 start_seconds=start_seconds,
                 end_seconds=end_seconds,
