@@ -218,6 +218,9 @@ async def export_video(
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
+    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    fade_seconds: float = Form(0),
+    audio_volume: float = Form(1),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -239,19 +242,40 @@ async def export_video(
     if effective_end - start_seconds > 300:
         raise HTTPException(status_code=413, detail="This starter export supports up to 5 minutes per render. Shorten the clip and retry.")
 
+    clip_duration = effective_end - start_seconds
+    if not 0 <= fade_seconds <= 3:
+        raise HTTPException(status_code=422, detail="Fade duration must be between 0 and 3 seconds.")
+    if fade_seconds * 2 > clip_duration:
+        raise HTTPException(status_code=422, detail="Fade-in and fade-out together cannot exceed the clip duration.")
+    if not 0 <= audio_volume <= 2:
+        raise HTTPException(status_code=422, detail="Audio volume must be between 0 and 2.")
+
     output_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     output = EXPORT_DIR / output_name
-    filters = {
+    framing_filters = {
         "original": "scale='min(1920,iw)':-2:force_original_aspect_ratio=decrease",
         "vertical": "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
         "square": "scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(ow-iw)/2:(oh-ih)/2",
     }
+    looks = {
+        "natural": "eq=contrast=1.02:saturation=1.03:brightness=0",
+        "cinematic": "eq=contrast=1.12:saturation=0.88:brightness=-0.015",
+        "warm": "eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03",
+        "mono": "hue=s=0,eq=contrast=1.08",
+    }
+    video_filters = [framing_filters[preset], looks[color_style]]
+    if fade_seconds > 0:
+        video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
+        video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
+    audio_filters = [f"volume={audio_volume}"]
+    if fade_seconds > 0:
+        audio_filters.extend([f"afade=t=in:st=0:d={fade_seconds}", f"afade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
-    preset_speed = "veryfast" if quality == "small" else "fast"
     command = [
         "ffmpeg", "-y", "-hide_banner", "-threads", "1", "-filter_threads", "1",
         "-filter_complex_threads", "1", "-ss", str(start_seconds), "-i", str(source),
-        "-t", str(effective_end - start_seconds), "-vf", filters[preset],
+        "-t", str(clip_duration), "-vf", ",".join(video_filters),
+        "-af", ",".join(audio_filters),
         "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
     ]
@@ -269,7 +293,10 @@ async def export_video(
         "duration_seconds": round(effective_end - start_seconds, 2),
         "preset": preset,
         "quality": quality,
-        "message": "Basic FFmpeg export completed. This is not yet an AI-directed edit.",
+        "color_style": color_style,
+        "fade_seconds": fade_seconds,
+        "audio_volume": audio_volume,
+        "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
     }
 
 
