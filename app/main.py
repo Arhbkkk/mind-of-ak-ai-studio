@@ -261,8 +261,7 @@ async def analyze_video(stored_name: str) -> dict:
     }
 
 
-@app.post("/api/export")
-async def export_video(
+async def _render_export_now(
     stored_name: str = Form(...),
     preset: Literal["original", "vertical", "square"] = Form("original"),
     quality: Literal["high", "balanced", "small"] = Form("high"),
@@ -348,6 +347,65 @@ async def export_video(
         "audio_volume": audio_volume,
         "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
     }
+
+
+
+# In-process render jobs keep long FFmpeg work out of the browser's initial HTTP request.
+# For multi-instance/production reliability, replace this dictionary with a durable queue.
+_EXPORT_JOBS: dict[str, dict] = {}
+
+@app.post("/api/export")
+async def start_export(
+    stored_name: str = Form(...),
+    preset: Literal["original", "vertical", "square"] = Form("original"),
+    quality: Literal["high", "balanced", "small"] = Form("high"),
+    start_seconds: float = Form(0),
+    end_seconds: float = Form(0),
+    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    fade_seconds: float = Form(0),
+    audio_volume: float = Form(1),
+) -> dict:
+    # Fail fast for missing sources; the render itself runs asynchronously.
+    safe_upload(stored_name)
+    job_id = uuid.uuid4().hex
+    _EXPORT_JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Render queued."}
+
+    async def run_job() -> None:
+        _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
+        try:
+            result = await _render_export_now(
+                stored_name=stored_name,
+                preset=preset,
+                quality=quality,
+                start_seconds=start_seconds,
+                end_seconds=end_seconds,
+                color_style=color_style,
+                fade_seconds=fade_seconds,
+                audio_volume=audio_volume,
+            )
+            _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
+        except HTTPException as exc:
+            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=str(exc.detail))
+        except Exception as exc:
+            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=f"Unexpected render error: {type(exc).__name__}: {exc}")
+
+    asyncio.create_task(run_job())
+    return {"ok": True, "job_id": job_id, "status": "queued", "status_url": f"/api/export-status/{job_id}"}
+
+
+@app.get("/api/export-status/{job_id}")
+async def export_status(job_id: str) -> dict:
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise HTTPException(status_code=400, detail="Invalid render job ID.")
+    job = _EXPORT_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Render job not found. The service may have restarted; please submit the export again.")
+    response = {"ok": True, "job_id": job_id, "status": job["status"], "progress": job.get("progress", 0), "message": job.get("message", "")}
+    if job["status"] == "completed":
+        response["result"] = job["result"]
+    elif job["status"] == "failed":
+        response["error"] = job.get("error", "Unknown render failure.")
+    return response
 
 
 @app.get("/api/download/{filename}")
