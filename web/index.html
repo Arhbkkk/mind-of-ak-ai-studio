@@ -11,10 +11,10 @@
 </head>
 <body><main class="shell">
 <header class="nav"><div class="brand"><div class="mark">AK</div><div>Mind of AK <span style="color:var(--gold)">AI Studio</span></div></div><div class="status">● PHASE 2 · VIDEO PIPELINE</div></header>
-<section class="hero"><div class="eyebrow">Creator workspace · Built in stages</div><h1>Your footage.<br><span>Your signature.</span></h1><p>Upload a clip, inspect its technical details and scene-change candidates, then export a clean MP4 with a format and quality you control. The editing foundation is growing toward a natural-looking, prompt-directed AI studio.</p></section>
+<section class="hero"><div class="eyebrow">Creator workspace · Built in stages</div><h1>Your footage.<br><span>Your signature.</span></h1><p>Upload a clip, inspect its technical details and scene-change candidates, then export a clean MP4 with a format and quality you control. This starter build supports validated uploads, scene-change analysis and memory-conscious MP4 exports. AI-directed editing features are being added in stages.</p></section>
 <section class="layout"><div class="panel">
 <h2>01 / Source &amp; analysis</h2><p class="sub">Select a video. The server validates that it is readable before enabling analysis and export.</p>
-<div class="drop"><div><div class="upload-icon">↑</div><strong>Bring your footage</strong><small>MP4, MOV, M4V, WEBM, MKV · Server limit shown below</small><input id="videoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v" hidden><button class="btn" id="chooseBtn" type="button">Choose video</button><div class="filename" id="fileName"></div></div></div>
+<div class="drop"><div><div class="upload-icon">↑</div><strong>Bring your footage</strong><small>MP4, MOV, M4V, WEBM, MKV · 50 MB maximum on this hosting plan</small><input id="videoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v" hidden><button class="btn" id="chooseBtn" type="button">Choose video</button><div class="filename" id="fileName"></div></div></div>
 <video id="preview" class="preview" controls playsinline></video>
 <div class="actions"><button class="btn" id="uploadBtn" type="button" disabled>Upload &amp; validate</button><button class="btn secondary" id="analyzeBtn" type="button" disabled>Analyse scenes</button></div>
 <div class="result" id="uploadResult" role="status" aria-live="polite"></div><div class="result" id="analysisResult"></div>
@@ -28,7 +28,7 @@
 <div class="field"><label for="endTime">End time (seconds; 0 = end)</label><input id="endTime" type="number" min="0" step="0.1" value="0"></div>
 </div>
 <div class="actions"><button class="btn" id="exportBtn" type="button" disabled>Render MP4</button></div><div class="result" id="exportResult" role="status" aria-live="polite"></div>
-<div class="notice">Render safety limit: up to 5 minutes per export on this starter service. This creates a basic re-encoded MP4; it does not yet add AI cuts, captions, music, voice, effects or upscaling. Export files on free hosting may disappear after a restart.</div>
+<div class="notice">Render safety limit: source videos up to 3 minutes and exports up to 5 minutes on this starter service. This creates a basic re-encoded MP4; it does not yet add AI cuts, captions, music, voice, effects or upscaling. Export files on free hosting may disappear after a restart.</div>
 </div>
 <aside class="panel"><h2>Studio roadmap</h2><p class="sub">A staged build toward professional creator workflows. “Planned” means not yet active.</p>
 <div class="features">

@@ -18,11 +18,33 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/mind-of-ak-uploads"))
 EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
-MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "250")))
+MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "50")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "180")))
+TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def cleanup_old_files() -> None:
+    """Remove stale temporary media so repeated jobs cannot fill the instance disk."""
+    import time
+
+    cutoff = time.time() - TEMP_FILE_MAX_AGE_SECONDS
+    for folder in (UPLOAD_DIR, EXPORT_DIR):
+        try:
+            for path in folder.iterdir():
+                try:
+                    if path.is_file() and path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+
+
+cleanup_old_files()
 
 app = FastAPI(title="Mind of AK AI Studio", version="0.2.0")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
@@ -67,7 +89,8 @@ async def health() -> dict:
         "ffmpeg_available": shutil.which("ffmpeg") is not None,
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
-        "pipeline_version": "0.2.0",
+        "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
+        "pipeline_version": "0.3.0",
     }
 
 
@@ -118,6 +141,16 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=415, detail="No video stream was found in this file.")
     stream = streams[0]
     duration = float(stream.get("duration") or metadata.get("format", {}).get("duration") or 0)
+    if duration <= 0:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=415, detail="Could not determine the video duration.")
+    if duration > MAX_SOURCE_DURATION_SECONDS:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=413,
+            detail=f"This free-hosting build accepts videos up to {MAX_SOURCE_DURATION_SECONDS} seconds. Trim the source and try again."
+        )
+    cleanup_old_files()
     return {
         "ok": True,
         "message": "Video uploaded and validated.",
@@ -146,10 +179,16 @@ async def analyze_video(stored_name: str) -> dict:
     video = next((s for s in data.get("streams", []) if s.get("codec_type") == "video"), {})
     audio = next((s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {})
     duration = float(data.get("format", {}).get("duration") or 0)
+    if duration > MAX_SOURCE_DURATION_SECONDS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Scene analysis is limited to {MAX_SOURCE_DURATION_SECONDS} seconds on this hosting plan."
+        )
     # Scene-change candidates are detected by FFmpeg. This is signal analysis, not AI semantic understanding.
     scene_result = await run_command([
-        "ffmpeg", "-hide_banner", "-i", str(source), "-vf",
-        "select='gt(scene,0.35)',showinfo", "-an", "-f", "null", "-"
+        "ffmpeg", "-hide_banner", "-threads", "1", "-filter_threads", "1",
+        "-i", str(source), "-vf", "select='gt(scene,0.35)',showinfo",
+        "-an", "-f", "null", "-"
     ], timeout=120)
     times = []
     if scene_result.returncode in (0, 1):
@@ -210,16 +249,18 @@ async def export_video(
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
     preset_speed = "veryfast" if quality == "small" else "fast"
     command = [
-        "ffmpeg", "-y", "-hide_banner", "-ss", str(start_seconds), "-i", str(source),
+        "ffmpeg", "-y", "-hide_banner", "-threads", "1", "-filter_threads", "1",
+        "-filter_complex_threads", "1", "-ss", str(start_seconds), "-i", str(source),
         "-t", str(effective_end - start_seconds), "-vf", filters[preset],
-        "-c:v", "libx264", "-preset", preset_speed, "-crf", crf,
-        "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)
+        "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
     ]
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+    cleanup_old_files()
     return {
         "ok": True,
         "filename": output_name,
