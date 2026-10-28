@@ -122,13 +122,20 @@ $('confirmExportBtn').addEventListener('click',async()=>{
    const looks={natural:'eq=contrast=1.02:saturation=1.03:brightness=0',cinematic:'eq=contrast=1.12:saturation=0.88:brightness=-0.015',warm:'eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03',mono:'hue=s=0,eq=contrast=1.08'};
    const look=looks[$('colorStyle').value], framing=$('framing').value, fade=Number($('fadeSeconds').value||0), audio=Number($('audioVolume').value||1);
    let vf;
-   if(framing==='fill') vf='scale='+w+':'+h+':force_original_aspect_ratio=increase,crop='+w+':'+h+','+look;
-   else vf='scale='+w+':'+h+':force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,'+look;
-   if(fade>0) vf+=',fade=t=in:st=0:d='+fade+',fade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;
-   const args=['-y','-hide_banner','-threads','1','-i',inputName,'-ss',String(startValue),'-t',String(duration),'-vf',vf,'-af','volume='+audio];
+   const args=['-y','-hide_banner','-threads','1','-i',inputName,'-ss',String(startValue),'-t',String(duration)];
+   if(framing==='blur'&&preset!=='original'){
+     let graph='[0:v]split=2[bgsrc][fgsrc];[bgsrc]scale='+w+':'+h+':force_original_aspect_ratio=increase,crop='+w+':'+h+',boxblur=24:12[bg];[fgsrc]scale='+w+':'+h+':force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,'+look;
+     if(fade>0) graph+=',fade=t=in:st=0:d='+fade+',fade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;
+     args.push('-filter_complex',graph+'[vout]','-map','[vout]','-map','0:a?');
+   }else{
+     if(framing==='fill') vf='scale='+w+':'+h+':force_original_aspect_ratio=increase,crop='+w+':'+h+','+look;
+     else vf='scale='+w+':'+h+':force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,'+look;
+     if(fade>0) vf+=',fade=t=in:st=0:d='+fade+',fade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;
+     args.push('-vf',vf);
+   }
+   args.push('-af',fade>0?'volume='+audio+',afade=t=in:st=0:d='+fade+',afade=t=out:st='+Math.max(0,duration-fade)+':d='+fade:'volume='+audio);
    if(format==='webm') args.push('-c:v','libvpx-vp9','-crf',qualityCrfWebm($('quality').value),'-b:v','0','-c:a','libopus','-b:a','128k','-f','webm',outputName);
    else args.push('-c:v','libx264','-preset','ultrafast','-crf',({'high':'18','balanced':'22','small':'27'})[$('quality').value],'-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart',outputName);
-   if(fade>0){const ai=args.indexOf('-af');args[ai+1]='volume='+audio+',afade=t=in:st=0:d='+fade+',afade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;}
    setBusy('confirmExportBtn',true,'Rendering…');
    $('exportResult').textContent='Rendering on this device… 0%\nLarge files may take several minutes. Keep this tab open.';
    await ffmpeg.exec(args);
