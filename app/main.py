@@ -292,7 +292,7 @@ async def _render_export_now(
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
-    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    color_style: Literal["natural", "cinematic", "warm", "mono", "claude_reference"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
     audio_cleanup: bool = Form(False),
@@ -368,6 +368,9 @@ async def _render_export_now(
         "cinematic": "eq=contrast=1.12:saturation=0.88:brightness=-0.015",
         "warm": "eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03",
         "mono": "hue=s=0,eq=contrast=1.08",
+        # Reference-inspired editorial look: warm mids, darker reds/blacks,
+        # controlled saturation, gentle vignette and restrained film grain.
+        "claude_reference": "eq=contrast=1.12:saturation=0.92:brightness=-0.012,colorbalance=rs=0.035:gs=0.006:bs=-0.025,vignette=PI/5,noise=alls=3:allf=t",
     }
     video_filters = base_filters + [looks[color_style]]
     if fade_seconds > 0:
