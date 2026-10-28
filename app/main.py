@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -432,14 +433,24 @@ async def start_export(
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
 ) -> dict:
-    # This single-process service has no external queue; reject overlapping renders
-    # so concurrent FFmpeg processes cannot exhaust the instance memory.
+    # The worker runs FFmpeg with a 240-second timeout. Clear any in-memory job
+    # that has exceeded a generous 5-minute deadline, otherwise a killed worker
+    # can leave exports permanently locked until the next service restart.
+    now = time.time()
+    for stale_id, stale_job in list(_EXPORT_JOBS.items()):
+        if stale_job.get("status") in ("queued", "running"):
+            started_at = stale_job.get("started_at", stale_job.get("created_at", now))
+            if now - started_at > 300:
+                stale_job.update(status="failed", progress=0,
+                                 error="Export timed out or its worker stopped. Please start a new export.")
+                print(f"EXPORT_JOB_STALE id={stale_id} age_seconds={int(now - started_at)}", flush=True)
+    # This single-process service has no external queue; reject only active renders.
     if any(job.get("status") in ("queued", "running") for job in _EXPORT_JOBS.values()):
-        raise HTTPException(status_code=429, detail="Another export is already running. Wait for it to finish before starting another render.")
+        raise HTTPException(status_code=429, detail="Another export is still running. Wait for it to finish before starting another render.")
     # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
     job_id = uuid.uuid4().hex
-    _EXPORT_JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Render queued."}
+    _EXPORT_JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Render queued.", "created_at": time.time(), "started_at": time.time()}
 
     async def run_job() -> None:
         _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
