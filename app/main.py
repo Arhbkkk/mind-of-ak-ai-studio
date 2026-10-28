@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
+from app.captions import generate_captions
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -167,6 +168,19 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         "frame_rate": stream.get("r_frame_rate"),
     }
 
+
+
+@app.post("/api/captions/generate")
+async def generate_caption_files(
+    text: str = Form(...),
+    duration_seconds: float = Form(...),
+    words_per_caption: int = Form(6),
+) -> dict:
+    """Format supplied script/transcript as SRT and VTT with approximate timing."""
+    try:
+        return generate_captions(text, duration_seconds, words_per_caption)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/validate")
