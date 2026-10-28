@@ -331,7 +331,9 @@ async def _render_export_now(
         }
         target_width, target_height = dimensions[resolution][preset]
 
-    # Browser-side FFmpeg is the primary export path; server endpoint remains for compatibility.\n\n    if framing == "fill":
+    # Browser-side FFmpeg is the primary export path; server endpoint remains for compatibility.
+
+    if framing == "fill":
         base_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase", f"crop={target_width}:{target_height}"]
     elif framing == "blur":
         # Duplicate the source: blurred, cropped background + aspect-preserving foreground.
