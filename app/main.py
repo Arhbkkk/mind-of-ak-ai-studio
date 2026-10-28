@@ -388,7 +388,7 @@ async def _render_export_now(
     if subtitle_srt.strip():
         subtitle_path = EXPORT_DIR / f"ak_subs_{uuid.uuid4().hex}.ass"
         try:
-            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style, start_seconds)
+            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style, start_seconds, target_width, target_height)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Subtitle validation failed: {exc}") from exc
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
