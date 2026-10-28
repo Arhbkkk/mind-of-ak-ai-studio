@@ -80,8 +80,9 @@ def audio_diagnostics(silence_stderr: str, loudness_stderr: str = "") -> dict[st
     for index, start in enumerate(starts):
         end = float(ends[index]) if index < len(ends) else None
         silences.append({"start": float(start), "end": end, "duration": round(end-float(start), 3) if end is not None else None})
-    integrated = re.findall(r"\bI:\s*(-?[0-9.]+)\s*LUFS", loudness_stderr)
-    true_peak = re.findall(r"\bPeak:\s*(-?[0-9.]+)\s*dBFS", loudness_stderr)
+    combined = silence_stderr + "\n" + loudness_stderr
+    integrated = re.findall(r"\bI:\s*(-?[0-9.]+)\s*LUFS", combined)
+    true_peak = re.findall(r"\bPeak:\s*(-?[0-9.]+)\s*dBFS", combined)
     return {
         "silence_segments": silences,
         "integrated_loudness_lufs": float(integrated[-1]) if integrated else None,
