@@ -331,17 +331,7 @@ async def _render_export_now(
         }
         target_width, target_height = dimensions[resolution][preset]
 
-    # Render instances on the free 512 MiB plan can be OOM-killed by 1080p/4K
-    # blur graphs. Cap the actual render canvas to 720p-class dimensions while
-    # keeping the selected aspect ratio; higher resolution presets are advisory
-    # only on this constrained host.
-    max_render_edge = 640
-    if max(target_width, target_height) > max_render_edge:
-        ratio = max_render_edge / max(target_width, target_height)
-        target_width = max(2, int(target_width * ratio) // 2 * 2)
-        target_height = max(2, int(target_height * ratio) // 2 * 2)
-
-    if framing == "fill":
+    # Browser-side FFmpeg is the primary export path; server endpoint remains for compatibility.\n\n    if framing == "fill":
         base_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase", f"crop={target_width}:{target_height}"]
     elif framing == "blur":
         # Duplicate the source: blurred, cropped background + aspect-preserving foreground.
