@@ -26,12 +26,23 @@ def audio_filter_chain(volume: float = 1.0, cleanup: bool = False, loudness: boo
     return filters
 
 
-def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style: str = "gold") -> dict[str, Any]:
+def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style: str = "gold", offset_seconds: float = 0.0) -> dict[str, Any]:
     """Validate supplied SRT and convert it to UTF-8 ASS with safe, readable styling."""
     cues = parse_srt(srt_text)
+    adjusted = []
+    clip_end = offset_seconds + duration
     for cue in cues:
-        if cue["end_seconds"] > duration + 0.05:
-            raise ValueError(f"Subtitle cue {cue['index']} ends beyond the selected clip duration.")
+        # SRT normally follows the source timeline. Shift it to the trimmed clip,
+        # dropping cues outside the selection and clipping cues at trim boundaries.
+        start = max(0.0, cue["start_seconds"] - offset_seconds)
+        end = min(duration, cue["end_seconds"] - offset_seconds)
+        if cue["end_seconds"] <= offset_seconds or cue["start_seconds"] >= clip_end:
+            continue
+        if end > start:
+            adjusted.append({**cue, "start_seconds": start, "end_seconds": end})
+    cues = adjusted
+    if not cues:
+        raise ValueError("No SRT captions overlap the selected export range.")
     styles = {
         "gold": ("&H0017ACFC", "&H00FFFFFF"),
         "white": ("&H00FFFFFF", "&H00FFFFFF"),
@@ -51,14 +62,14 @@ def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
         "[V4+ Styles]\n"
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
-        f"Style: AK,Poppins,62,{primary},&H000000FF,{outline},&H99000000,-1,0,3,2.5,1,2,70,70,130,1\n\n"
+        f"Style: AK,FreeSans,62,{primary},&H000000FF,{outline},&H99000000,-1,0,3,2.5,1,2,70,70,130,1\n\n"
         "[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
     )
     events = []
     for cue in cues:
         events.append(f"Dialogue: 0,{stamp(cue['start_seconds'])},{stamp(cue['end_seconds'])},AK,,0,0,0,,{clean(cue['text'])}")
     output_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    return {"cue_count": len(cues), "subtitle_style": style, "subtitle_file": str(output_path)}
+    return {"cue_count": len(cues), "subtitle_style": style, "subtitle_file": str(output_path), "offset_seconds": offset_seconds}
 
 
 def audio_diagnostics(silence_stderr: str, loudness_stderr: str = "") -> dict[str, Any]:
