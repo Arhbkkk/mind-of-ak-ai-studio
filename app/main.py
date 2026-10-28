@@ -288,8 +288,11 @@ async def _render_export_now(
     if start_seconds < 0 or end_seconds < 0 or start_seconds >= duration:
         raise HTTPException(status_code=422, detail="Start time must be within the source video.")
     effective_end = end_seconds if end_seconds > 0 else duration
-    if effective_end > duration or effective_end <= start_seconds:
+    # The browser displays source duration rounded to milliseconds. Permit that
+    # tiny display-rounding difference, then clamp to the exact FFprobe duration.
+    if effective_end > duration + 0.05 or effective_end <= start_seconds:
         raise HTTPException(status_code=422, detail="End time must be after start time and no later than the source duration.")
+    effective_end = min(effective_end, duration)
     if effective_end - start_seconds > 300:
         raise HTTPException(status_code=413, detail="This starter export supports up to 5 minutes per render. Shorten the clip and retry.")
 
