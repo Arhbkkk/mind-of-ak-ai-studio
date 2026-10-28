@@ -11,7 +11,7 @@
 </head>
 <body><main class="shell">
 <header class="nav"><div class="brand"><div class="mark">AK</div><div>Mind of AK <span style="color:var(--gold)">AI Studio</span></div></div><div class="status">● PHASE 2 · VIDEO PIPELINE</div></header>
-<section class="hero"><div class="eyebrow">Creator workspace · Built in stages</div><h1>Your footage.<br><span>Your signature.</span></h1><p>Upload a clip, inspect its technical details and scene-change candidates, then export a clean MP4 with a format and quality you control. This starter build supports validated uploads, scene-change analysis and memory-conscious MP4 exports. AI-directed editing features are being added in stages.</p></section>
+<section class="hero"><div class="eyebrow">Creator workspace · Built in stages</div><h1>Your footage.<br><span>Your signature.</span></h1><p>Upload a clip, inspect its technical details and scene-change candidates, then export in your chosen format and resolution. Video rendering runs in your browser, not on the Render server. This starter build supports validated uploads, scene-change analysis and memory-conscious MP4 exports. AI-directed editing features are being added in stages.</p></section>
 <section class="layout"><div class="panel">
 <h2>01 / Source &amp; analysis</h2><p class="sub">Select a video. The server validates that it is readable before enabling analysis and export.</p>
 <div class="drop"><div><div class="upload-icon">↑</div><strong>Bring your footage</strong><small>MP4, MOV, M4V, WEBM, MKV · 50 MB maximum on this hosting plan</small><input id="videoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v" hidden><button class="btn" id="chooseBtn" type="button">Choose video</button><div class="filename" id="fileName"></div></div></div>
@@ -28,10 +28,10 @@
 </div>
 <div class="notice">Strict mode: missing checks are never marked as passed. Speech-to-text is not integrated yet, so this build cannot claim that spoken words match the script or SRT.</div>
 <hr class="section-divider">
-<h2>03 / Export controls</h2><p class="sub">Create a basic FFmpeg export. Choose the framing, compression target and optional trim range.</p>
+<h2>03 / Export controls</h2><p class="sub">Render locally in your browser with FFmpeg WebAssembly. Choose the output format, resolution, framing, compression target and optional trim range.</p>
 <div class="field-grid">
 <div class="field"><label for="preset">Aspect ratio</label><select id="preset"><option value="original">Original / Auto-detect</option><option value="landscape">16:9 · Landscape</option><option value="vertical" selected>9:16 · Portrait</option><option value="square">1:1 · Square</option><option value="social">4:5 · Social feed</option></select></div>
-<div class="field"><label for="resolution">Resolution</label><select id="resolution"><option value="720p">720p HD</option><option value="1080p" selected>1080p Full HD</option><option value="1440p">1440p QHD</option><option value="4k">4K UHD</option></select></div>
+<div class="field"><label for="resolution">Resolution</label><select id="resolution"><option value="720p">720p HD</option><option value="1080p" selected>1080p Full HD</option><option value="1440p">1440p QHD</option><option value="4k">4K UHD</option></select></div>\n<div class="field"><label for="outputFormat">Output format</label><select id="outputFormat"><option value="mp4" selected>MP4 · H.264 / AAC</option><option value="webm">WebM · VP9 / Opus</option></select></div>
 <div class="field"><label for="framing">Fit / fill / background</label><select id="framing"><option value="fit">Fit · no crop</option><option value="fill">Fill · crop edges</option><option value="blur" selected>Blur background</option></select></div>
 <div class="field"><label for="quality">Export quality</label><select id="quality"><option value="high" selected>High quality</option><option value="balanced">Balanced size</option><option value="small">Smaller file</option></select></div>
 <div class="field"><label for="startTime">Start time (seconds)</label><input id="startTime" type="number" min="0" step="0.1" value="0"></div>
@@ -61,7 +61,7 @@
 <div class="notice">Copyright note: music, footage, images, fonts and SFX must be licensed for your intended use. The future auto-editor should prefer original or properly licensed assets and never promise that a track is copyright-safe without checking its licence.</div>
 </aside></section>
 <footer class="footer"><span>© Mind of AK AI Studio</span><span>Phase 2 · Video analysis &amp; basic export</span></footer></main>
-<div class="export-modal" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle"><div class="export-dialog"><div class="eyebrow">Final step · Export</div><h2 id="exportModalTitle">Review your export</h2><p class="sub">Check the final format before rendering. Source content is never stretched; fit preserves the full frame, fill crops edges, and blur uses a softened background.</p><div class="export-summary" id="exportSummary"></div><div class="actions"><button class="btn secondary" id="editExportBtn" type="button">Back to settings</button><button class="btn" id="confirmExportBtn" type="button">Render MP4</button></div><div class="ratio-hint">Output dimensions are even-numbered for H.264 compatibility. 4K exports may take longer and use more memory.</div></div></div>
+<div class="export-modal" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle"><div class="export-dialog"><div class="eyebrow">Final step · Export</div><h2 id="exportModalTitle">Review your export</h2><p class="sub">Check the final format before rendering. Source content is never stretched; fit preserves the full frame, fill crops edges, and blur uses a softened background.</p><div class="export-summary" id="exportSummary"></div><div class="actions"><button class="btn secondary" id="editExportBtn" type="button">Back to settings</button><button class="btn" id="confirmExportBtn" type="button">Render video</button></div><div class="ratio-hint">Output dimensions are even-numbered for H.264 compatibility. High resolutions use more memory on your device. Rendering does not use Render server RAM.</div></div></div>
 <script>
 const $=id=>document.getElementById(id);let selectedFile=null,storedName=null,sourceDuration=0,previewUrl=null,sourceWidth=0,sourceHeight=0;
 window.addEventListener('error',event=>{const message='App script error: '+(event.message||'unknown error');$('apiStatus').textContent=message;});window.addEventListener('unhandledrejection',event=>{const reason=event.reason; $('apiStatus').textContent='App async error: '+(reason&&reason.message?reason.message:String(reason||'unknown error'));});
@@ -75,10 +75,83 @@ $('exportBtn').addEventListener('click',e=>{e.preventDefault();if(!storedName){$
 $('editExportBtn').addEventListener('click',()=>$('exportModal').classList.remove('open'));
 $('exportModal').addEventListener('click',e=>{if(e.target===$('exportModal'))$('exportModal').classList.remove('open');});
 $('preset').addEventListener('change',updateRatioHint);$('resolution').addEventListener('change',renderExportSummary);$('framing').addEventListener('change',renderExportSummary);$('quality').addEventListener('change',renderExportSummary);
-$('confirmExportBtn').addEventListener('click',async()=>{if(!storedName){$('exportResult').textContent='Upload & validate a video before exporting.';return;}const startValue=Number($('startTime').value||0);const endValue=Number($('endTime').value||0);if(!Number.isFinite(startValue)||!Number.isFinite(endValue)||startValue<0||endValue<0){$('exportResult').textContent='Enter valid non-negative start and end times.';return;}if(!sourceDuration||sourceDuration<=0){$('exportResult').textContent='Source duration is unavailable. Upload and validate the video again.';return;}if(startValue>=sourceDuration){$('exportResult').textContent='Start time must be before the source duration ('+sourceDuration.toFixed(3)+' seconds).';return;}if(endValue>0&&(endValue<=startValue||endValue>sourceDuration+0.05)){$('exportResult').textContent='End time must be after start time and no later than '+sourceDuration.toFixed(3)+' seconds. Set End time to 0 to use the full remaining video.';return;}$('exportModal').classList.remove('open');setBusy('exportBtn',true,'Rendering…');setBusy('confirmExportBtn',true,'Rendering…');$('exportResult').textContent='Submitting render job…';try{const form=new FormData();form.append('stored_name',storedName);form.append('preset',$('preset').value);form.append('framing',$('framing').value);form.append('resolution',$('resolution').value);form.append('quality',$('quality').value);form.append('start_seconds',$('startTime').value||'0');form.append('end_seconds',$('endTime').value||'0');form.append('color_style',$('colorStyle').value);form.append('fade_seconds',$('fadeSeconds').value);form.append('audio_volume',$('audioVolume').value);const response=await fetch('/api/export',{method:'POST',body:form});const started=await readResponse(response);if(!response.ok)throw new Error(started.detail||'Could not start export');if(!started.job_id)throw new Error('Server did not return a render job ID');const deadline=Date.now()+20*60*1000;let data;while(Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,2000));const poll=await fetch('/api/export-status/'+encodeURIComponent(started.job_id),{cache:'no-store'});data=await readResponse(poll);if(!poll.ok)throw new Error(data.detail||'Could not read render status');if(data.status==='completed'){data=data.result;break;}if(data.status==='failed')throw new Error(data.error||'FFmpeg render failed');$('exportResult').textContent='Render status: '+data.status+' · '+(data.progress||0)+'%\\n'+(data.message||'Processing…')+'\\nThis is job status, not a guessed render percentage.';}if(!data||data.status!=='completed'&&!data.download_url)throw new Error('Render is still running after 20 minutes. Check Render logs before retrying; avoid starting duplicate renders.');$('exportResult').textContent='✓ Export complete\\nDuration: '+formatTime(data.duration_seconds)+' · '+(data.output_width&&data.output_height?(data.output_width+' × '+data.output_height+' px · '):'')+ratioName(data.preset)+' · '+data.framing+' · '+data.quality+' quality\\nFile size: '+(data.size_bytes/1048576).toFixed(2)+' MB\\n';const link=document.createElement('a');link.href=new URL(data.download_url,window.location.origin).href;link.textContent='Download MP4 to this device';link.className='btn';link.style.display='inline-block';link.style.textDecoration='none';link.style.marginTop='8px';link.setAttribute('download','mind-of-ak-export.mp4');$('exportResult').appendChild(document.createElement('br'));$('exportResult').appendChild(link);$('exportResult').appendChild(document.createElement('div')).textContent=data.message;}catch(e){$('exportResult').textContent='Export error: '+e.message+'\\nOpen Render → Logs for the matching FFmpeg/server error.';}finally{setBusy('exportBtn',false,'Review export settings');setBusy('confirmExportBtn',false,'Render MP4');}});
+$('confirmExportBtn').addEventListener('click',async()=>{
+ if(!selectedFile){$('exportResult').textContent='Choose a video file first.';return;}
+ const startValue=Number($('startTime').value||0), endValue=Number($('endTime').value||0);
+ if(!Number.isFinite(startValue)||!Number.isFinite(endValue)||startValue<0||endValue<0){$('exportResult').textContent='Enter valid non-negative start and end times.';return;}
+ if(!sourceDuration||sourceDuration<=0){$('exportResult').textContent='Upload & validate the video first so its duration and dimensions are known.';return;}
+ if(startValue>=sourceDuration){$('exportResult').textContent='Start time must be before the source duration.';return;}
+ if(endValue>0&&(endValue<=startValue||endValue>sourceDuration+0.05)){$('exportResult').textContent='End time must be after start time and no later than the source duration.';return;}
+ const duration=Math.min(endValue>0?endValue:sourceDuration,sourceDuration)-startValue;
+ if(duration<=0){$('exportResult').textContent='The selected trim range is empty.';return;}
+ const format=$('outputFormat').value, outputName='mind-of-ak-export.'+format;
+ $('exportModal').classList.remove('open');
+ setBusy('exportBtn',true,'Rendering in browser…');setBusy('confirmExportBtn',true,'Loading FFmpeg…');
+ $('exportResult').textContent='Loading browser video engine. First load may download about 30 MB; keep this tab open.';
+ let ffmpeg;
+ try{
+   const modules=await Promise.all([
+     import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'),
+     import('https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js')
+   ]);
+   const FFmpeg=modules[0].FFmpeg, toBlobURL=modules[1].toBlobURL, fetchFile=modules[1].fetchFile;
+   ffmpeg=new FFmpeg();
+   ffmpeg.on('log',({message})=>{if(message&&/error|invalid|failed/i.test(message))console.debug('[Browser FFmpeg]',message);});
+   ffmpeg.on('progress',({progress})=>{const pct=Math.max(0,Math.min(100,Math.round((progress||0)*100)));$('exportResult').textContent='Rendering on this device… '+pct+'%\nKeep this tab open until the download appears.';});
+   const base='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+   await ffmpeg.load({coreURL:await toBlobURL(base+'/ffmpeg-core.js','text/javascript'),wasmURL:await toBlobURL(base+'/ffmpeg-core.wasm','application/wasm')});
+   setBusy('confirmExportBtn',true,'Preparing video…');
+   const inputExt=(selectedFile.name.split('.').pop()||'mp4').toLowerCase().replace(/[^a-z0-9]/g,'');
+   const inputName='source.'+inputExt;
+   await ffmpeg.writeFile(inputName,await fetchFile(selectedFile));
+   const limits={'720p':1280,'1080p':1920,'1440p':2560,'4k':3840};
+   let w=sourceWidth||1280,h=sourceHeight||720;
+   const preset=$('preset').value, resolution=$('resolution').value;
+   if(preset==='original'){
+     const scale=Math.min(1,limits[resolution]/Math.max(w,h));
+     w=Math.max(2,Math.floor(w*scale/2)*2);h=Math.max(2,Math.floor(h*scale/2)*2);
+   }else{
+     const dims={
+       '720p':{landscape:[1280,720],vertical:[720,1280],square:[720,720],social:[720,900]},
+       '1080p':{landscape:[1920,1080],vertical:[1080,1920],square:[1080,1080],social:[1080,1350]},
+       '1440p':{landscape:[2560,1440],vertical:[1440,2560],square:[1440,1440],social:[1440,1800]},
+       '4k':{landscape:[3840,2160],vertical:[2160,3840],square:[2160,2160],social:[1728,2160]}
+     };
+     [w,h]=dims[resolution][preset];
+   }
+   const looks={natural:'eq=contrast=1.02:saturation=1.03:brightness=0',cinematic:'eq=contrast=1.12:saturation=0.88:brightness=-0.015',warm:'eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03',mono:'hue=s=0,eq=contrast=1.08'};
+   const look=looks[$('colorStyle').value], framing=$('framing').value, fade=Number($('fadeSeconds').value||0), audio=Number($('audioVolume').value||1);
+   let vf;
+   if(framing==='fill') vf='scale='+w+':'+h+':force_original_aspect_ratio=increase,crop='+w+':'+h+','+look;
+   else vf='scale='+w+':'+h+':force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,'+look;
+   if(fade>0) vf+=',fade=t=in:st=0:d='+fade+',fade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;
+   const args=['-y','-hide_banner','-threads','1','-i',inputName,'-ss',String(startValue),'-t',String(duration),'-vf',vf,'-af','volume='+audio];
+   if(format==='webm') args.push('-c:v','libvpx-vp9','-crf',qualityCrfWebm($('quality').value),'-b:v','0','-c:a','libopus','-b:a','128k','-f','webm',outputName);
+   else args.push('-c:v','libx264','-preset','ultrafast','-crf',({'high':'18','balanced':'22','small':'27'})[$('quality').value],'-pix_fmt','yuv420p','-c:a','aac','-b:a','128k','-movflags','+faststart',outputName);
+   if(fade>0){const ai=args.indexOf('-af');args[ai+1]='volume='+audio+',afade=t=in:st=0:d='+fade+',afade=t=out:st='+Math.max(0,duration-fade)+':d='+fade;}
+   setBusy('confirmExportBtn',true,'Rendering…');
+   $('exportResult').textContent='Rendering on this device… 0%\nLarge files may take several minutes. Keep this tab open.';
+   await ffmpeg.exec(args);
+   const bytes=await ffmpeg.readFile(outputName);
+   if(!bytes||!bytes.length)throw new Error('FFmpeg produced an empty output file.');
+   const blob=new Blob([bytes],{type:format==='webm'?'video/webm':'video/mp4'}), url=URL.createObjectURL(blob);
+   $('exportResult').replaceChildren();
+   const summary=document.createElement('div');summary.className='success';summary.textContent='✓ Browser export complete\n'+formatTime(duration)+' · '+w+' × '+h+' px · '+format.toUpperCase()+' · '+$('quality').value+' quality\nFile size: '+(blob.size/1048576).toFixed(2)+' MB';$('exportResult').append(summary);
+   const link=document.createElement('a');link.href=url;link.download=outputName;link.textContent='Download '+format.toUpperCase()+' to this device';link.className='btn';link.style.display='inline-block';link.style.textDecoration='none';link.style.marginTop='8px';$('exportResult').append(document.createElement('br'),link);
+   const note=document.createElement('div');note.className='ratio-hint';note.textContent='Rendered locally in your browser. Your export was not processed by the Render server.';$('exportResult').append(note);
+   try{await ffmpeg.deleteFile(inputName);await ffmpeg.deleteFile(outputName);}catch(_){}
+ }catch(e){
+   console.error('Browser export failed:',e);
+   $('exportResult').textContent='Browser export failed: '+(e&&e.message?e.message:String(e))+'\nTry MP4, close other heavy tabs, or use a shorter clip. Your video was not sent to the server for rendering.';
+ }finally{
+   if(ffmpeg){try{await ffmpeg.terminate();}catch(_){}}
+   setBusy('exportBtn',false,'Review export settings');setBusy('confirmExportBtn',false,'Render video');
+ }
+});
+function qualityCrfWebm(value){return ({high:'24',balanced:'32',small:'40'})[value]||'32';}
 function ratioName(value){return ({original:'Original / Auto',landscape:'16:9 Landscape',vertical:'9:16 Portrait',square:'1:1 Square',social:'4:5 Social feed'})[value]||value;}
 function updateRatioHint(){const ratio=sourceWidth&&sourceHeight?(sourceWidth/sourceHeight).toFixed(3):'—';const detected=sourceWidth&&sourceHeight?(sourceWidth+' × '+sourceHeight+' px · '+ratio+' ratio'):'Waiting for upload';$('sourceRatioHint').textContent='Detected source: '+detected+'. Auto keeps the source ratio; choose a social ratio to reframe it.';}
-function renderExportSummary(){const labels={fit:'Fit · full frame, no crop',fill:'Fill · crop edges',blur:'Blur background · full frame'};const quality={high:'High · CRF 18',balanced:'Balanced · CRF 22',small:'Smaller file · CRF 27'};const values=[['Source',sourceWidth+' × '+sourceHeight+' px'],['Aspect ratio',ratioName($('preset').value)],['Resolution',$('resolution').value.toUpperCase()],['Framing',labels[$('framing').value]],['Quality',quality[$('quality').value]],['Color look',$('colorStyle').selectedOptions[0].text],['Trim',formatTime($('startTime').value||0)+' → '+($('endTime').value>0?formatTime($('endTime').value):'End of video')],['Audio',Math.round(Number($('audioVolume').value)*100)+'% volume']];$('exportSummary').replaceChildren();values.forEach(([label,value])=>{const item=document.createElement('div'),small=document.createElement('small'),strong=document.createElement('strong');small.textContent=label;strong.textContent=value;item.append(small,strong);$('exportSummary').append(item);});}
+function renderExportSummary(){const labels={fit:'Fit · full frame, no crop',fill:'Fill · crop edges',blur:'Blur background · full frame'};const quality={high:'High · CRF 18',balanced:'Balanced · CRF 22',small:'Smaller file · CRF 27'};const values=[['Source',sourceWidth+' × '+sourceHeight+' px'],['Aspect ratio',ratioName($('preset').value)],['Resolution',$('resolution').value.toUpperCase()],['Framing',labels[$('framing').value]],['Quality',quality[$('quality').value]],['Format',$('outputFormat').value.toUpperCase()],['Color look',$('colorStyle').selectedOptions[0].text],['Trim',formatTime($('startTime').value||0)+' → '+($('endTime').value>0?formatTime($('endTime').value):'End of video')],['Audio',Math.round(Number($('audioVolume').value)*100)+'% volume']];$('exportSummary').replaceChildren();values.forEach(([label,value])=>{const item=document.createElement('div'),small=document.createElement('small'),strong=document.createElement('strong');small.textContent=label;strong.textContent=value;item.append(small,strong);$('exportSummary').append(item);});}
 async function readResponse(response){const raw=await response.text();try{return JSON.parse(raw);}catch(e){throw new Error('Server returned an invalid response (HTTP '+response.status+'): '+raw.slice(0,180));}}
 function setBusy(id,busy,label){const button=$(id);button.disabled=busy;button.textContent=label;}
 function formatTime(s){if(!Number.isFinite(Number(s)))return 'unknown';s=Math.max(0,Math.floor(Number(s)));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return h?String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'):String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');}
