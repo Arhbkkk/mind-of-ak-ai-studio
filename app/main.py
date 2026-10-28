@@ -14,7 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
-from app.claude_pipeline import audio_filter_chain, build_ass_subtitles
+from app.claude_pipeline import audio_diagnostics, audio_filter_chain, build_ass_subtitles
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -260,6 +260,28 @@ async def analyze_video(stored_name: str) -> dict:
         "scene_change_candidates": times[:100],
         "scene_detection_note": "Scene candidates are based on visual change, not AI understanding of story or meaning.",
     }
+
+
+@app.get("/api/audio-diagnostics/{stored_name}")
+async def inspect_audio(stored_name: str) -> dict:
+    """Measure silence and loudness from the uploaded source without changing it."""
+    source = safe_upload(stored_name)
+    probe = await run_command([
+        "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=index", "-of", "csv=p=0", str(source)
+    ], timeout=20)
+    if probe.returncode != 0:
+        raise HTTPException(status_code=422, detail="Could not inspect source audio.")
+    if not probe.stdout.strip():
+        raise HTTPException(status_code=422, detail="No audio stream was found in this video.")
+    result = await run_command([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(source),
+        "-map", "0:a:0", "-af", "silencedetect=noise=-45dB:d=0.1,ebur128=peak=true",
+        "-f", "null", "-"
+    ], timeout=90)
+    if result.returncode != 0:
+        raise HTTPException(status_code=422, detail=f"Audio diagnostics failed: {(result.stderr or 'Unknown FFmpeg error')[-700:]}")
+    return {"ok": True, **audio_diagnostics(result.stderr or "")}
 
 
 async def _render_export_now(
