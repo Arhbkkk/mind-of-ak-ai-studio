@@ -26,7 +26,7 @@ def audio_filter_chain(volume: float = 1.0, cleanup: bool = False, loudness: boo
     return filters
 
 
-def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style: str = "gold", offset_seconds: float = 0.0) -> dict[str, Any]:
+def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style: str = "gold", offset_seconds: float = 0.0, canvas_width: int = 1080, canvas_height: int = 1920) -> dict[str, Any]:
     """Validate supplied SRT and convert it to UTF-8 ASS with safe, readable styling."""
     cues = parse_srt(srt_text)
     adjusted = []
@@ -59,7 +59,7 @@ def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style
         # ASS special characters are escaped; line breaks remain intentional.
         return text.replace("\\", r"\\").replace("{", r"\\{").replace("}", r"\\}").replace("\n", r"\\N")
     header = (
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
+        f"[Script Info]\nScriptType: v4.00+\nPlayResX: {canvas_width}\nPlayResY: {canvas_height}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n"
         "[V4+ Styles]\n"
         "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
         f"Style: AK,FreeSans,62,{primary},&H000000FF,{outline},&H99000000,-1,0,3,2.5,1,2,70,70,130,1\n\n"
@@ -69,7 +69,7 @@ def build_ass_subtitles(srt_text: str, duration: float, output_path: Path, style
     for cue in cues:
         events.append(f"Dialogue: 0,{stamp(cue['start_seconds'])},{stamp(cue['end_seconds'])},AK,,0,0,0,,{clean(cue['text'])}")
     output_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    return {"cue_count": len(cues), "subtitle_style": style, "subtitle_file": str(output_path), "offset_seconds": offset_seconds}
+    return {"cue_count": len(cues), "subtitle_style": style, "subtitle_file": str(output_path), "offset_seconds": offset_seconds, "canvas_width": canvas_width, "canvas_height": canvas_height}
 
 
 def audio_diagnostics(silence_stderr: str, loudness_stderr: str = "") -> dict[str, Any]:
