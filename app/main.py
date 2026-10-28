@@ -432,8 +432,58 @@ async def _render_export_now(
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+
+    # Post-export audit: verify actual container/stream metadata rather than
+    # assuming the requested output settings were honored.
+    audit_probe = await run_command([
+        "ffprobe", "-v", "error", "-show_entries",
+        "stream=codec_type,codec_name,width,height,pix_fmt,sample_rate,channels",
+        "-show_entries", "format=duration", "-of", "json", str(output)
+    ], timeout=30)
+    if audit_probe.returncode != 0:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Export was created but its output metadata could not be verified.")
+    try:
+        audit_data = json.loads(audit_probe.stdout)
+        output_streams = audit_data.get("streams", [])
+        output_video = next(stream for stream in output_streams if stream.get("codec_type") == "video")
+        output_audio = next((stream for stream in output_streams if stream.get("codec_type") == "audio"), None)
+        actual_width, actual_height = int(output_video["width"]), int(output_video["height"])
+        actual_duration = float(audit_data.get("format", {}).get("duration") or 0)
+    except (ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as exc:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Export output is missing required video metadata.") from exc
+    audit_checks = {
+        "h264_video": output_video.get("codec_name") == "h264",
+        "even_dimensions": actual_width % 2 == 0 and actual_height % 2 == 0,
+        "yuv420p": output_video.get("pix_fmt") == "yuv420p",
+        "audio_stream_present": output_audio is not None,
+        "duration_seconds": round(actual_duration, 3),
+        "actual_width": actual_width,
+        "actual_height": actual_height,
+        "video_codec": output_video.get("codec_name"),
+        "pixel_format": output_video.get("pix_fmt"),
+    }
+    if not audit_checks["h264_video"] or not audit_checks["even_dimensions"] or not audit_checks["yuv420p"]:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Output audit failed: expected H.264 video, even dimensions and yuv420p pixel format.")
+    if output_audio:
+        loudness_check = await run_command([
+            "ffmpeg", "-hide_banner", "-nostats", "-i", str(output), "-map", "0:a:0",
+            "-af", "ebur128=peak=true", "-f", "null", "-"
+        ], timeout=75)
+        audit_checks["audio_loudness_lufs"] = audio_diagnostics(loudness_check.stderr or "").get("integrated_loudness_lufs")
+        audit_checks["audio_true_peak_dbfs"] = audio_diagnostics(loudness_check.stderr or "").get("true_peak_dbfs")
     cleanup_old_files()
     if subtitle_path:
         subtitle_path.unlink(missing_ok=True)
@@ -454,7 +504,7 @@ async def _render_export_now(
         "audio_volume": audio_volume,
         "audio_cleanup": audio_cleanup,
         "loudness_normalize": loudness_normalize,
-        "captions_burned_in": bool(subtitle_srt.strip()),
+        "post_export_audit": audit_checks,\n        "captions_burned_in": bool(subtitle_srt.strip()),
         "subtitle_style": subtitle_style if subtitle_srt.strip() else None,
         "message": "Export completed with optional supplied SRT captions, conservative audio cleanup and EBU R128 loudness normalization. No AI-generated content is used.",
     }
