@@ -335,7 +335,7 @@ async def _render_export_now(
     # blur graphs. Cap the actual render canvas to 720p-class dimensions while
     # keeping the selected aspect ratio; higher resolution presets are advisory
     # only on this constrained host.
-    max_render_edge = 1280
+    max_render_edge = 640
     if max(target_width, target_height) > max_render_edge:
         ratio = max_render_edge / max(target_width, target_height)
         target_width = max(2, int(target_width * ratio) // 2 * 2)
@@ -386,7 +386,7 @@ async def _render_export_now(
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
     command.extend([
         "-af", ",".join(audio_filters),
-        "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
+        "-c:v", "libx264", "-threads", "1", "-preset", "ultrafast", "-crf", crf,
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
     ])
     result = await run_command(command, timeout=240)
@@ -443,6 +443,7 @@ async def start_export(
 
     async def run_job() -> None:
         _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
+        print(f"EXPORT_JOB_START id={job_id} preset={preset} framing={framing} resolution={resolution}", flush=True)
         try:
             result = await _render_export_now(
                 stored_name=stored_name,
@@ -457,10 +458,13 @@ async def start_export(
                 audio_volume=audio_volume,
             )
             _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
+            print(f"EXPORT_JOB_COMPLETE id={job_id} bytes={result.get('size_bytes')}", flush=True)
         except HTTPException as exc:
             _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=str(exc.detail))
+            print(f"EXPORT_JOB_FAILED id={job_id} status={exc.status_code} error={exc.detail}", flush=True)
         except Exception as exc:
             _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=f"Unexpected render error: {type(exc).__name__}: {exc}")
+            print(f"EXPORT_JOB_CRASH id={job_id} error={type(exc).__name__}: {exc}", flush=True)
 
     asyncio.create_task(run_job())
     return {"ok": True, "job_id": job_id, "status": "queued", "status_url": f"/api/export-status/{job_id}"}
