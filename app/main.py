@@ -306,6 +306,10 @@ async def _render_export_now(
     probe = await run_command([
         "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(source)
     ], timeout=20)
+    audio_probe = await run_command([
+        "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(source)
+    ], timeout=20)
+    has_audio = audio_probe.returncode == 0 and bool(audio_probe.stdout.strip())
     try:
         duration = float(probe.stdout.strip())
     except (ValueError, TypeError):
@@ -405,7 +409,7 @@ async def _render_export_now(
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
         if subtitle_path:
             complex_filters += f",subtitles={subtitle_path}"
-        command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
+        command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]", "-map", "0:a?"])
     elif framing == "blur" and preset == "original":
         original_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]]
         if fade_seconds > 0:
@@ -417,10 +421,13 @@ async def _render_export_now(
         if subtitle_path:
             video_filters.append(f"subtitles={subtitle_path}")
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
+    if has_audio:
+        command.extend(["-af", ",".join(audio_filters), "-c:a", "aac", "-b:a", "128k"])
+    else:
+        command.append("-an")
     command.extend([
-        "-af", ",".join(audio_filters),
         "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output)
     ])
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
@@ -467,7 +474,7 @@ async def start_export(
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
-    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    color_style: Literal["natural", "cinematic", "warm", "mono", "claude_reference"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
     audio_cleanup: bool = Form(False),
