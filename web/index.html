@@ -28,7 +28,19 @@
 </div>
 <div class="notice">Strict mode: missing checks are never marked as passed. Speech-to-text is not integrated yet, so this build cannot claim that spoken words match the script or SRT.</div>
 <hr class="section-divider">
-<h2>03 / Export controls</h2><p class="sub">Create a basic FFmpeg export. Choose the framing, compression target and optional trim range.</p>
+<h2>03 / Free caption formatter <span class="badge">No credits</span></h2>
+<p class="sub">Turn a supplied script or transcript into downloadable SRT/VTT files. Timing is approximate; this does not perform speech recognition.</p>
+<div class="field-grid">
+<div class="field full"><label for="captionText">Script or transcript</label><textarea id="captionText" placeholder="Paste narration or transcript…"></textarea></div>
+<div class="field"><label for="captionDuration">Video duration (seconds)</label><input id="captionDuration" type="number" min="0.1" max="3600" step="0.1" value="45"></div>
+<div class="field"><label for="captionWords">Words per caption</label><select id="captionWords"><option value="3">3 · Short</option><option value="6" selected>6 · Balanced</option><option value="10">10 · Long</option></select></div>
+<div class="field full"><button class="btn secondary" id="generateCaptionsBtn" type="button">Generate SRT + VTT</button><div class="result" id="captionResult" role="status" aria-live="polite"></div></div>
+<div class="field full"><label for="captionOutput">Generated SRT (editable)</label><textarea id="captionOutput" placeholder="Generated subtitles appear here…"></textarea></div>
+<div class="actions full"><button class="btn secondary" id="downloadSrtBtn" type="button" disabled>Download SRT</button><button class="btn secondary" id="downloadVttBtn" type="button" disabled>Download VTT</button></div>
+</div>
+<div class="notice">Free text formatting: captions need review and timing adjustment against the actual audio.</div>
+<hr class="section-divider">
+<h2>04 / Export controls</h2><p class="sub">Create a basic FFmpeg export. Choose the framing, compression target and optional trim range.</p>
 <div class="field-grid">
 <div class="field"><label for="preset">Aspect ratio</label><select id="preset"><option value="original">Original / Auto-detect</option><option value="landscape">16:9 · Landscape</option><option value="vertical" selected>9:16 · Portrait</option><option value="square">1:1 · Square</option><option value="social">4:5 · Social feed</option></select></div>
 <div class="field"><label for="resolution">Resolution</label><select id="resolution"><option value="720p">720p HD</option><option value="1080p" selected>1080p Full HD</option><option value="1440p">1440p QHD</option><option value="4k">4K UHD</option></select></div>
@@ -86,4 +98,4 @@ fetch('/api/health').then(r=>r.json()).then(d=>{$('apiStatus').textContent='Back
 $('audioVolume').addEventListener('input',()=>{$('volumeLabel').textContent=Math.round(Number($('audioVolume').value)*100)+'%';});
 $('saveBriefBtn').addEventListener('click',()=>{const brief={projectType:$('projectType').value,editBrief:$('editBrief').value,targetDuration:$('targetDuration').value,language:$('language').value,savedAt:new Date().toISOString()};try{localStorage.setItem('mindOfAkEditBrief',JSON.stringify(brief));$('briefResult').textContent='Brief saved in this browser on this device. It is not uploaded to the server or sent to an AI model.';}catch(e){$('briefResult').textContent='Could not save this brief in local browser storage.';}});
 try{const saved=JSON.parse(localStorage.getItem('mindOfAkEditBrief')||'null');if(saved){$('projectType').value=saved.projectType||$('projectType').value;$('editBrief').value=saved.editBrief||'';$('targetDuration').value=saved.targetDuration||45;$('language').value=saved.language||'Tamil';}}catch(e){}
-</script></body></html>
+</script><script src="/static/captions.js"></script></body></html>
