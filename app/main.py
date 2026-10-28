@@ -381,7 +381,7 @@ async def _render_export_now(
     if subtitle_srt.strip():
         subtitle_path = EXPORT_DIR / f"ak_subs_{uuid.uuid4().hex}.ass"
         try:
-            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style)
+            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style, start_seconds)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Subtitle validation failed: {exc}") from exc
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
@@ -404,7 +404,12 @@ async def _render_export_now(
             complex_filters += f",subtitles={subtitle_path}"
         command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
     elif framing == "blur" and preset == "original":
-        command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
+        original_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]]
+        if fade_seconds > 0:
+            original_filters.extend([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
+        if subtitle_path:
+            original_filters.append(f"subtitles={subtitle_path}")
+        command.extend(["-vf", ",".join(original_filters)])
     else:
         if subtitle_path:
             video_filters.append(f"subtitles={subtitle_path}")
