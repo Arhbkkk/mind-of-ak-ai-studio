@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
+from app.claude_pipeline import audio_filter_chain, build_ass_subtitles
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -272,6 +273,10 @@ async def _render_export_now(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    audio_cleanup: bool = Form(False),
+    loudness_normalize: bool = Form(False),
+    subtitle_srt: str = Form(""),
+    subtitle_style: Literal["gold", "white", "documentary"] = Form("gold"),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -347,9 +352,16 @@ async def _render_export_now(
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
 
-    audio_filters = [f"volume={audio_volume}"]
+    audio_filters = audio_filter_chain(audio_volume, audio_cleanup, loudness_normalize)
     if fade_seconds > 0:
         audio_filters.extend([f"afade=t=in:st=0:d={fade_seconds}", f"afade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
+    subtitle_path = None
+    if subtitle_srt.strip():
+        subtitle_path = EXPORT_DIR / f"ak_subs_{uuid.uuid4().hex}.ass"
+        try:
+            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Subtitle validation failed: {exc}") from exc
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
     command = [
         "ffmpeg", "-y", "-hide_banner", "-threads", "1", "-filter_threads", "1",
@@ -366,10 +378,14 @@ async def _render_export_now(
         )
         if fade_seconds > 0:
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
+        if subtitle_path:
+            complex_filters += f",subtitles={subtitle_path}"
         command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
     elif framing == "blur" and preset == "original":
         command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
     else:
+        if subtitle_path:
+            video_filters.append(f"subtitles={subtitle_path}")
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
     command.extend([
         "-af", ",".join(audio_filters),
@@ -382,6 +398,8 @@ async def _render_export_now(
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
     cleanup_old_files()
+    if subtitle_path:
+        subtitle_path.unlink(missing_ok=True)
     return {
         "ok": True,
         "filename": output_name,
@@ -397,7 +415,11 @@ async def _render_export_now(
         "color_style": color_style,
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
-        "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
+        "audio_cleanup": audio_cleanup,
+        "loudness_normalize": loudness_normalize,
+        "captions_burned_in": bool(subtitle_srt.strip()),
+        "subtitle_style": subtitle_style if subtitle_srt.strip() else None,
+        "message": "Export completed with optional supplied SRT captions, conservative audio cleanup and EBU R128 loudness normalization. No AI-generated content is used.",
     }
 
 
@@ -418,6 +440,10 @@ async def start_export(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    audio_cleanup: bool = Form(False),
+    loudness_normalize: bool = Form(False),
+    subtitle_srt: str = Form(""),
+    subtitle_style: Literal["gold", "white", "documentary"] = Form("gold"),
 ) -> dict:
     # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
@@ -438,6 +464,10 @@ async def start_export(
                 color_style=color_style,
                 fade_seconds=fade_seconds,
                 audio_volume=audio_volume,
+                audio_cleanup=audio_cleanup,
+                loudness_normalize=loudness_normalize,
+                subtitle_srt=subtitle_srt,
+                subtitle_style=subtitle_style,
             )
             _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
         except HTTPException as exc:
