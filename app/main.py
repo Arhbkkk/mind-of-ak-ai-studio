@@ -331,6 +331,16 @@ async def _render_export_now(
         }
         target_width, target_height = dimensions[resolution][preset]
 
+    # Render instances on the free 512 MiB plan can be OOM-killed by 1080p/4K
+    # blur graphs. Cap the actual render canvas to 720p-class dimensions while
+    # keeping the selected aspect ratio; higher resolution presets are advisory
+    # only on this constrained host.
+    max_render_edge = 1280
+    if max(target_width, target_height) > max_render_edge:
+        ratio = max_render_edge / max(target_width, target_height)
+        target_width = max(2, int(target_width * ratio) // 2 * 2)
+        target_height = max(2, int(target_height * ratio) // 2 * 2)
+
     if framing == "fill":
         base_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase", f"crop={target_width}:{target_height}"]
     elif framing == "blur":
@@ -422,6 +432,10 @@ async def start_export(
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
 ) -> dict:
+    # This single-process service has no external queue; reject overlapping renders
+    # so concurrent FFmpeg processes cannot exhaust the instance memory.
+    if any(job.get("status") in ("queued", "running") for job in _EXPORT_JOBS.values()):
+        raise HTTPException(status_code=429, detail="Another export is already running. Wait for it to finish before starting another render.")
     # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
     job_id = uuid.uuid4().hex
