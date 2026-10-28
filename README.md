@@ -21,7 +21,7 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 
 - AI prompt-to-edit and automatic scene-by-scene directing.
 - Automatic highlight selection, beat matching, transitions, and gaming montage.
-- Automatic captions/transcription, including Tamil-English code-switching. Speech recognition is not integrated; audio/script matching remains `NOT_VERIFIED` unless a transcript is supplied by a separate trusted ASR step.
+- Automatic speech recognition, including Tamil-English code-switching, is not integrated yet. A new no-credit SRT/VTT formatter can turn a supplied script/transcript into approximate-timing subtitle files; it does not listen to audio or perform ASR. Speech recognition and audio alignment remain unverified.
 - Tamil/English TTS, original music, sleep ambience, and kids' story narration.
 - AI asset search and licensing verification, generated diagrams, puzzle drawings, or B-roll insertion.
 - Natural denoise, stabilization, color grading, super-resolution/upscaling, or any guarantee of increased source detail.
@@ -48,7 +48,7 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 - `GET /api/health` — service and media-tool status.
 - `POST /api/upload` — multipart field `file`; validates the uploaded video.
 - `GET /api/analyze/{stored_name}` — technical metadata and visual scene-change candidates.
-- `POST /api/validate` — multipart fields `stored_name`, optional `script`, optional `.srt` file field `srt_file`, and optional externally generated `transcript_text`. Returns PASS/WARNING/FAIL/NOT_VERIFIED checks. A supplied transcript is compared as text only; it is not generated from audio here.
+- `POST /api/validate` — multipart fields `stored_name`, optional `script`, optional `.srt` file field `srt_file`, and optional externally generated `transcript_text`. Returns PASS/WARNING/FAIL/NOT_VERIFIED checks. A supplied transcript is compared as text only; it is not generated from audio here.\n- `POST /api/captions/generate` — multipart fields `text`, `duration_seconds`, and optional `words_per_caption` (1–20). Returns editable SRT/VTT text and caption cues with approximate timing. No paid API or credits are used; timing is not audio-aligned.
 - `POST /api/export` — multipart fields: `stored_name`, `preset` (`original`, `vertical`, `square`), `quality` (`high`, `balanced`, `small`), `start_seconds`, `end_seconds` (0 means source end).
 - `GET /api/download/{filename}` — download a completed export.
 
