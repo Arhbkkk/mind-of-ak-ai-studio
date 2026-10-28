@@ -71,3 +71,19 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 ## Validation guarantees and limits
 
 Validation is deliberately conservative: `NOT_VERIFIED` is not a pass. SRT checks cover parseability, timestamp ordering, cue duration, overlap warnings, and whether cues exceed the source duration. Optional script comparison only compares the script against a transcript supplied by another process; it does not transcribe the audio or guarantee pronunciation/semantic correctness. This build does not yet provide automatic speech recognition, image-to-narration semantic matching, a frame-accurate visual timeline, or post-render audio/subtitle/image auditing. Those checks must remain unverified until implemented and tested. Absolute perfect validation cannot be guaranteed by automated checks alone; uncertain cases require human review.
+
+
+## Claude-reference finishing workflow (deterministic FFmpeg)
+
+- Source audio inspection uses FFmpeg silencedetect and EBU R128 ebur128 to report silence segments, integrated loudness and peak when measurable.
+- Optional conservative voice cleanup: high-pass filter, FFmpeg denoise and light compression.
+- Optional loudness normalization targeting -14 LUFS with FFmpeg loudnorm.
+- Optional supplied SRT burn-in with gold, white or documentary styling, dark translucent caption boxes, and source-timeline offsetting for trimmed exports.
+- Reference-inspired cinematic look: slightly darker contrast, warm/red mids, controlled saturation, gentle vignette and restrained grain.
+- H.264 MP4 output, even dimensions and yuv420p remain enabled for playback compatibility.
+
+### Important boundaries
+
+This is a deterministic editing pipeline, not a full AI editor. It does not yet transcribe speech, semantically match images to narration, generate diagrams or B-roll, generate voice/music, or guarantee exact word-level caption timing. Use an existing SRT for captions and inspect/listen to the finished export. Tamil rendering depends on fonts installed in the deployment image, so verify with a real Tamil sample before publishing.
+
+Render jobs still live in process memory and local temporary storage. A host restart can interrupt jobs or remove files; a durable queue and persistent object storage remain future reliability work.

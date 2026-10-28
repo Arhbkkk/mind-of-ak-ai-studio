@@ -14,6 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
+from app.claude_pipeline import audio_diagnostics, audio_filter_chain, build_ass_subtitles
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -261,6 +262,28 @@ async def analyze_video(stored_name: str) -> dict:
     }
 
 
+@app.get("/api/audio-diagnostics/{stored_name}")
+async def inspect_audio(stored_name: str) -> dict:
+    """Measure silence and loudness from the uploaded source without changing it."""
+    source = safe_upload(stored_name)
+    probe = await run_command([
+        "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "-show_entries", "stream=index", "-of", "csv=p=0", str(source)
+    ], timeout=20)
+    if probe.returncode != 0:
+        raise HTTPException(status_code=422, detail="Could not inspect source audio.")
+    if not probe.stdout.strip():
+        raise HTTPException(status_code=422, detail="No audio stream was found in this video.")
+    result = await run_command([
+        "ffmpeg", "-hide_banner", "-nostats", "-i", str(source),
+        "-map", "0:a:0", "-af", "silencedetect=noise=-45dB:d=0.1,ebur128=peak=true",
+        "-f", "null", "-"
+    ], timeout=90)
+    if result.returncode != 0:
+        raise HTTPException(status_code=422, detail=f"Audio diagnostics failed: {(result.stderr or 'Unknown FFmpeg error')[-700:]}")
+    return {"ok": True, **audio_diagnostics(result.stderr or "")}
+
+
 async def _render_export_now(
     stored_name: str = Form(...),
     preset: Literal["original", "landscape", "vertical", "square", "social"] = Form("original"),
@@ -269,9 +292,13 @@ async def _render_export_now(
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
-    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    color_style: Literal["natural", "cinematic", "warm", "mono", "claude_reference"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    audio_cleanup: bool = Form(False),
+    loudness_normalize: bool = Form(False),
+    subtitle_srt: str = Form(""),
+    subtitle_style: Literal["gold", "white", "documentary"] = Form("gold"),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -279,6 +306,10 @@ async def _render_export_now(
     probe = await run_command([
         "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(source)
     ], timeout=20)
+    audio_probe = await run_command([
+        "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index", "-of", "csv=p=0", str(source)
+    ], timeout=20)
+    has_audio = audio_probe.returncode == 0 and bool(audio_probe.stdout.strip())
     try:
         duration = float(probe.stdout.strip())
     except (ValueError, TypeError):
@@ -341,15 +372,25 @@ async def _render_export_now(
         "cinematic": "eq=contrast=1.12:saturation=0.88:brightness=-0.015",
         "warm": "eq=contrast=1.04:saturation=1.12:brightness=0.01,colorbalance=rs=0.04:gs=0.01:bs=-0.03",
         "mono": "hue=s=0,eq=contrast=1.08",
+        # Reference-inspired editorial look: warm mids, darker reds/blacks,
+        # controlled saturation, gentle vignette and restrained film grain.
+        "claude_reference": "eq=contrast=1.12:saturation=0.92:brightness=-0.012,colorbalance=rs=0.035:gs=0.006:bs=-0.025,vignette=PI/5,noise=alls=3:allf=t",
     }
     video_filters = base_filters + [looks[color_style]]
     if fade_seconds > 0:
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
 
-    audio_filters = [f"volume={audio_volume}"]
+    audio_filters = audio_filter_chain(audio_volume, audio_cleanup, loudness_normalize)
     if fade_seconds > 0:
         audio_filters.extend([f"afade=t=in:st=0:d={fade_seconds}", f"afade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
+    subtitle_path = None
+    if subtitle_srt.strip():
+        subtitle_path = EXPORT_DIR / f"ak_subs_{uuid.uuid4().hex}.ass"
+        try:
+            build_ass_subtitles(subtitle_srt, clip_duration, subtitle_path, subtitle_style, start_seconds, target_width, target_height)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Subtitle validation failed: {exc}") from exc
     crf = {"high": "18", "balanced": "22", "small": "27"}[quality]
     command = [
         "ffmpeg", "-y", "-hide_banner", "-threads", "1", "-filter_threads", "1",
@@ -366,22 +407,86 @@ async def _render_export_now(
         )
         if fade_seconds > 0:
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
-        command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
+        if subtitle_path:
+            complex_filters += f",subtitles={subtitle_path}"
+        command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]", "-map", "0:a?"])
     elif framing == "blur" and preset == "original":
-        command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
+        original_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]]
+        if fade_seconds > 0:
+            original_filters.extend([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"])
+        if subtitle_path:
+            original_filters.append(f"subtitles={subtitle_path}")
+        command.extend(["-vf", ",".join(original_filters)])
     else:
+        if subtitle_path:
+            video_filters.append(f"subtitles={subtitle_path}")
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
+    if has_audio:
+        command.extend(["-af", ",".join(audio_filters), "-c:a", "aac", "-b:a", "128k"])
+    else:
+        command.append("-an")
     command.extend([
-        "-af", ",".join(audio_filters),
         "-c:v", "libx264", "-threads", "1", "-preset", "veryfast", "-crf", crf,
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output)
     ])
     result = await run_command(command, timeout=240)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+
+    # Post-export audit: verify actual container/stream metadata rather than
+    # assuming the requested output settings were honored.
+    audit_probe = await run_command([
+        "ffprobe", "-v", "error", "-show_entries",
+        "stream=codec_type,codec_name,width,height,pix_fmt,sample_rate,channels",
+        "-show_entries", "format=duration", "-of", "json", str(output)
+    ], timeout=30)
+    if audit_probe.returncode != 0:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Export was created but its output metadata could not be verified.")
+    try:
+        audit_data = json.loads(audit_probe.stdout)
+        output_streams = audit_data.get("streams", [])
+        output_video = next(stream for stream in output_streams if stream.get("codec_type") == "video")
+        output_audio = next((stream for stream in output_streams if stream.get("codec_type") == "audio"), None)
+        actual_width, actual_height = int(output_video["width"]), int(output_video["height"])
+        actual_duration = float(audit_data.get("format", {}).get("duration") or 0)
+    except (ValueError, KeyError, StopIteration, TypeError, json.JSONDecodeError) as exc:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Export output is missing required video metadata.") from exc
+    audit_checks = {
+        "h264_video": output_video.get("codec_name") == "h264",
+        "even_dimensions": actual_width % 2 == 0 and actual_height % 2 == 0,
+        "yuv420p": output_video.get("pix_fmt") == "yuv420p",
+        "audio_stream_present": output_audio is not None,
+        "duration_seconds": round(actual_duration, 3),
+        "actual_width": actual_width,
+        "actual_height": actual_height,
+        "video_codec": output_video.get("codec_name"),
+        "pixel_format": output_video.get("pix_fmt"),
+    }
+    if not audit_checks["h264_video"] or not audit_checks["even_dimensions"] or not audit_checks["yuv420p"]:
+        output.unlink(missing_ok=True)
+        if subtitle_path:
+            subtitle_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="Output audit failed: expected H.264 video, even dimensions and yuv420p pixel format.")
+    if output_audio:
+        loudness_check = await run_command([
+            "ffmpeg", "-hide_banner", "-nostats", "-i", str(output), "-map", "0:a:0",
+            "-af", "ebur128=peak=true", "-f", "null", "-"
+        ], timeout=75)
+        audit_checks["audio_loudness_lufs"] = audio_diagnostics(loudness_check.stderr or "").get("integrated_loudness_lufs")
+        audit_checks["audio_true_peak_dbfs"] = audio_diagnostics(loudness_check.stderr or "").get("true_peak_dbfs")
     cleanup_old_files()
+    if subtitle_path:
+        subtitle_path.unlink(missing_ok=True)
     return {
         "ok": True,
         "filename": output_name,
@@ -397,7 +502,11 @@ async def _render_export_now(
         "color_style": color_style,
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
-        "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
+        "audio_cleanup": audio_cleanup,
+        "loudness_normalize": loudness_normalize,
+        "post_export_audit": audit_checks,\n        "captions_burned_in": bool(subtitle_srt.strip()),
+        "subtitle_style": subtitle_style if subtitle_srt.strip() else None,
+        "message": "Export completed with optional supplied SRT captions, conservative audio cleanup and EBU R128 loudness normalization. No AI-generated content is used.",
     }
 
 
@@ -415,9 +524,13 @@ async def start_export(
     quality: Literal["high", "balanced", "small"] = Form("high"),
     start_seconds: float = Form(0),
     end_seconds: float = Form(0),
-    color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
+    color_style: Literal["natural", "cinematic", "warm", "mono", "claude_reference"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    audio_cleanup: bool = Form(False),
+    loudness_normalize: bool = Form(False),
+    subtitle_srt: str = Form(""),
+    subtitle_style: Literal["gold", "white", "documentary"] = Form("gold"),
 ) -> dict:
     # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
@@ -438,6 +551,10 @@ async def start_export(
                 color_style=color_style,
                 fade_seconds=fade_seconds,
                 audio_volume=audio_volume,
+                audio_cleanup=audio_cleanup,
+                loudness_normalize=loudness_normalize,
+                subtitle_srt=subtitle_srt,
+                subtitle_style=subtitle_style,
             )
             _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
         except HTTPException as exc:
