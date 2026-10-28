@@ -19,8 +19,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/mind-of-ak-uploads"))
 EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
-MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "2048")))
-MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+# No application-level upload cap by default. Set MAX_UPLOAD_MB to a positive
+# value only if an explicit per-file limit is desired; hosting disk/request limits still apply.
+MAX_UPLOAD_MB = max(0, int(os.getenv("MAX_UPLOAD_MB", "0")))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024 if MAX_UPLOAD_MB > 0 else None
 MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "300")))
 TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
@@ -89,7 +91,8 @@ async def health() -> dict:
         "service": "Mind of AK AI Studio",
         "ffmpeg_available": shutil.which("ffmpeg") is not None,
         "ffprobe_available": shutil.which("ffprobe") is not None,
-        "max_upload_mb": MAX_UPLOAD_MB,
+        "max_upload_mb": MAX_UPLOAD_MB if MAX_UPLOAD_MB > 0 else None,
+        "upload_size_limit": "configured" if MAX_UPLOAD_MB > 0 else "no application-level cap; limited by hosting infrastructure",
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
         "pipeline_version": "0.4.0",
         "validation_endpoint": "/api/validate",
@@ -114,8 +117,8 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_MB} MB upload limit.")
+                if MAX_UPLOAD_BYTES is not None and total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail=f"File exceeds the configured {MAX_UPLOAD_MB} MB upload limit.")
                 output.write(chunk)
     except Exception:
         destination.unlink(missing_ok=True)
