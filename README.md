@@ -13,6 +13,8 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 - Export an MP4 with original, vertical 9:16, or square framing.
 - Choose high, balanced, or smaller-file export quality.
 - Trim a clip by start/end seconds; this starter limits each export to 5 minutes.
+- Browser timeline foundation: split a source clip at the preview playhead, trim individual source ranges, reorder clips, and delete clips.
+- Draft timeline export integration: send up to 12 ordered ranges from one source video, render each range with the same output settings, and concatenate them into one MP4 (hard cuts only; maximum combined duration 5 minutes).
 - Download the rendered MP4 to the user's device.
 - Save an edit brief in the current browser using local storage (not sent to an AI provider).
 - Evidence-based validation API for video stream metadata, SRT syntax/timing, subtitle overlap and duration bounds, and optional supplied-script/transcript text comparison.
@@ -20,6 +22,8 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 ## Not implemented yet
 
 - AI prompt-to-edit and automatic scene-by-scene directing.
+- Multi-source tracks, transitions, overlays, keyframes, per-clip audio tracks, crossfades, and frame-accurate multi-track editing.
+- Durable cloud project/timeline persistence; timeline data is currently held in the browser while editing.
 - Automatic highlight selection, beat matching, transitions, and gaming montage.
 - Automatic captions/transcription, including Tamil-English code-switching. Speech recognition is not integrated; audio/script matching remains `NOT_VERIFIED` unless a transcript is supplied by a separate trusted ASR step.
 - Tamil/English TTS, original music, sleep ambience, and kids' story narration.
