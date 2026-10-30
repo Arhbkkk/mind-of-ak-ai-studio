@@ -46,6 +46,10 @@ Open `http://localhost:8000`.
 
 FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile installs FFmpeg, which also supplies FFprobe.
 
+## Timeline editing
+
+The current single-source timeline supports splitting, trimming, reordering, deleting, and exporting up to 12 ordered ranges from one uploaded video. Export concatenates independently encoded segments with hard cuts; transitions, multiple source files, overlays, multiple tracks, per-clip audio, and durable cloud project storage are not implemented. Timeline ranges are validated server-side against source duration and a five-minute combined export ceiling.
+
 ## API
 
 - `GET /` — web interface.
