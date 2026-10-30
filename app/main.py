@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.validation import compare_script_to_transcript, validate_subtitles
+from app.validation import compare_script_to_transcript, validate_subtitles, validate_timeline_segments
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -418,22 +418,16 @@ async def _render_export_now(
 
 async def _render_timeline_now(stored_name: str, segments: list[dict], preset: str, framing: str, resolution: str, quality: str, color_style: str, fade_seconds: float, audio_volume: float) -> dict:
     """Render ordered source ranges with identical settings, then concatenate."""
-    if not 1 <= len(segments) <= 12:
-        raise HTTPException(status_code=422, detail="Timeline must contain between 1 and 12 clips.")
     source = safe_upload(stored_name)
     probe = await run_command(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(source)], timeout=20)
-    try: source_duration = float(probe.stdout.strip())
-    except (ValueError, TypeError): raise HTTPException(status_code=422, detail="Could not determine source duration.")
-    ranges = []
-    total = 0.0
-    for item in segments:
-        if not isinstance(item, dict): raise HTTPException(status_code=422, detail="Each timeline clip must be an object.")
-        try: start, end = float(item["start"]), float(item["end"])
-        except (KeyError, TypeError, ValueError): raise HTTPException(status_code=422, detail="Each clip needs numeric start and end values.")
-        if not (0 <= start < end <= source_duration + 0.05) or end - start < 0.1:
-            raise HTTPException(status_code=422, detail="Timeline clip range is outside the source or too short.")
-        end = min(end, source_duration); ranges.append((start,end)); total += end-start
-    if total > 300: raise HTTPException(status_code=413, detail="Combined timeline duration cannot exceed 5 minutes.")
+    if probe.returncode != 0:
+        raise HTTPException(status_code=422, detail="Could not determine source duration.")
+    try:
+        source_duration = float(probe.stdout.strip())
+        ranges = validate_timeline_segments(segments, source_duration)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    total = sum(end - start for start, end in ranges)
     rendered = []
     concat_file = EXPORT_DIR / f"ak_concat_{uuid.uuid4().hex}.txt"
     final_name = f"ak_export_{uuid.uuid4().hex}.mp4"; final_path = EXPORT_DIR / final_name
