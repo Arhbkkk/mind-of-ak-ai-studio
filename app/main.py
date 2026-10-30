@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
+from app.auth import install_owner_gate
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -50,6 +51,7 @@ cleanup_old_files()
 
 app = FastAPI(title="Mind of AK AI Studio", version="0.4.0")
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+install_owner_gate(app)
 
 
 def safe_upload(name: str) -> Path:

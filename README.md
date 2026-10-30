@@ -52,7 +52,7 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 - `POST /api/export` — multipart fields: `stored_name`, `preset` (`original`, `vertical`, `square`), `quality` (`high`, `balanced`, `small`), `start_seconds`, `end_seconds` (0 means source end).
 - `GET /api/download/{filename}` — download a completed export.
 
-## Environment variables
+## Owner-only access (required before private use)\n\nThe owner gate uses HTTP Basic authentication over HTTPS. Before using the hosted app, open the Render service environment settings and set:\n\n- `OWNER_USERNAME`: optional; defaults to `owner`.\n- `OWNER_PASSWORD`: required secret; choose a strong, unique password and enter it only in Render's environment settings. Never commit it to GitHub or share it in chat.\n\nThe gate protects the website, static assets, media APIs, exports, and downloads. `/api/health` remains public for Render health checks. If `OWNER_PASSWORD` is missing, protected routes fail closed with HTTP 503 rather than silently remaining public. Browsers may cache HTTP Basic credentials; use a private browser session and sign out/close it when finished.\n\nThis is a single-owner access gate, not per-project user accounts. It does not make the public GitHub repository private, and temporary media remains ephemeral on the current host. Do not upload sensitive media until the secret is configured and you have verified the sign-in prompt.\n\n## Environment variables
 
 - `MAX_UPLOAD_MB`: upload limit (default 2048 MB). Set this to a value your hosting platform can safely accept.
 - `UPLOAD_DIR`: source upload directory (default `/tmp/mind-of-ak-uploads`).
