@@ -416,6 +416,43 @@ async def _render_export_now(
 
 
 
+async def _render_timeline_now(stored_name: str, segments: list[dict], preset: str, framing: str, resolution: str, quality: str, color_style: str, fade_seconds: float, audio_volume: float) -> dict:
+    """Render ordered source ranges with identical settings, then concatenate."""
+    if not 1 <= len(segments) <= 12:
+        raise HTTPException(status_code=422, detail="Timeline must contain between 1 and 12 clips.")
+    source = safe_upload(stored_name)
+    probe = await run_command(["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",str(source)], timeout=20)
+    try: source_duration = float(probe.stdout.strip())
+    except (ValueError, TypeError): raise HTTPException(status_code=422, detail="Could not determine source duration.")
+    ranges = []
+    total = 0.0
+    for item in segments:
+        if not isinstance(item, dict): raise HTTPException(status_code=422, detail="Each timeline clip must be an object.")
+        try: start, end = float(item["start"]), float(item["end"])
+        except (KeyError, TypeError, ValueError): raise HTTPException(status_code=422, detail="Each clip needs numeric start and end values.")
+        if not (0 <= start < end <= source_duration + 0.05) or end - start < 0.1:
+            raise HTTPException(status_code=422, detail="Timeline clip range is outside the source or too short.")
+        end = min(end, source_duration); ranges.append((start,end)); total += end-start
+    if total > 300: raise HTTPException(status_code=413, detail="Combined timeline duration cannot exceed 5 minutes.")
+    rendered = []
+    concat_file = EXPORT_DIR / f"ak_concat_{uuid.uuid4().hex}.txt"
+    final_name = f"ak_export_{uuid.uuid4().hex}.mp4"; final_path = EXPORT_DIR / final_name
+    try:
+        for start,end in ranges:
+            part = await _render_export_now(stored_name=stored_name,preset=preset,framing=framing,resolution=resolution,quality=quality,start_seconds=start,end_seconds=end,color_style=color_style,fade_seconds=fade_seconds,audio_volume=audio_volume)
+            rendered.append(EXPORT_DIR / part["filename"])
+        concat_file.write_text("".join("file '" + str(path).replace("'","'\\''") + "'\\n" for path in rendered), encoding="utf-8")
+        joined = await run_command(["ffmpeg","-hide_banner","-threads","1","-f","concat","-safe","0","-i",str(concat_file),"-c","copy","-movflags","+faststart","-y",str(final_path)], timeout=240)
+        if joined.returncode != 0 or not final_path.is_file():
+            raise HTTPException(status_code=422, detail="Timeline concatenation failed: " + joined.stderr[-900:])
+        p = await run_command(["ffprobe","-v","error","-select_streams","v:0","-show_entries","stream=width,height","-of","csv=s=x:p=0",str(final_path)],timeout=20)
+        dims=p.stdout.strip().split("x"); width=int(dims[0]) if len(dims)==2 else None; height=int(dims[1]) if len(dims)==2 else None
+        return {"ok":True,"filename":final_name,"download_url":f"/api/download/{final_name}","size_bytes":final_path.stat().st_size,"duration_seconds":round(total,2),"preset":preset,"framing":framing,"resolution":resolution,"output_width":width,"output_height":height,"quality":quality,"color_style":color_style,"timeline_clips":len(ranges),"message":"Ordered timeline clips rendered and concatenated with hard cuts. Transitions are not included."}
+    finally:
+        concat_file.unlink(missing_ok=True)
+        for path in rendered: path.unlink(missing_ok=True)
+
+
 # In-process render jobs keep long FFmpeg work out of the browser's initial HTTP request.
 # For multi-instance/production reliability, replace this dictionary with a durable queue.
 _EXPORT_JOBS: dict[str, dict] = {}
@@ -432,6 +469,7 @@ async def start_export(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    timeline_json: str = Form(""),
 ) -> dict:
     # The worker runs FFmpeg with a 240-second timeout. Clear any in-memory job
     # that has exceeded a generous 5-minute deadline, otherwise a killed worker
@@ -447,6 +485,12 @@ async def start_export(
     # This single-process service has no external queue; reject only active renders.
     if any(job.get("status") in ("queued", "running") for job in _EXPORT_JOBS.values()):
         raise HTTPException(status_code=429, detail="Another export is still running. Wait for it to finish before starting another render.")
+    timeline_segments = None
+    if timeline_json.strip():
+        try: timeline_segments = json.loads(timeline_json)
+        except json.JSONDecodeError as exc: raise HTTPException(status_code=422, detail="Timeline data must be valid JSON.") from exc
+        if not isinstance(timeline_segments, list) or not 1 <= len(timeline_segments) <= 12:
+            raise HTTPException(status_code=422, detail="Timeline must contain between 1 and 12 clips.")
     # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
     job_id = uuid.uuid4().hex
@@ -456,7 +500,10 @@ async def start_export(
         _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
         print(f"EXPORT_JOB_START id={job_id} preset={preset} framing={framing} resolution={resolution}", flush=True)
         try:
-            result = await _render_export_now(
+            if timeline_segments:
+                result = await _render_timeline_now(stored_name, timeline_segments, preset, framing, resolution, quality, color_style, fade_seconds, audio_volume)
+            else:
+                result = await _render_export_now(
                 stored_name=stored_name,
                 preset=preset,
                 framing=framing,
