@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101010">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101010"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Mind of AK"><link rel="manifest" href="/static/manifest.webmanifest"><link rel="apple-touch-icon" href="/static/icons/icon-192.svg">
 <title>Mind of AK — AI Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -82,7 +82,7 @@ function renderExportSummary(){const labels={fit:'Fit · full frame, no crop',fi
 async function readResponse(response){const raw=await response.text();try{return JSON.parse(raw);}catch(e){throw new Error('Server returned an invalid response (HTTP '+response.status+'): '+raw.slice(0,180));}}
 function setBusy(id,busy,label){const button=$(id);button.disabled=busy;button.textContent=label;}
 function formatTime(s){if(!Number.isFinite(Number(s)))return 'unknown';s=Math.max(0,Math.floor(Number(s)));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;return h?String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'):String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');}
-fetch('/api/health').then(r=>r.json()).then(d=>{$('apiStatus').textContent='Backend online · FFmpeg '+(d.ffmpeg_available?'ready':'missing')+' · FFprobe '+(d.ffprobe_available?'ready':'missing')+' · Upload cap '+d.max_upload_mb+' MB · pipeline '+d.pipeline_version;}).catch(()=>$('apiStatus').textContent='Backend status unavailable. Refresh or check the deployment logs.');
+if ('serviceWorker' in navigator) { window.addEventListener('load',()=>navigator.serviceWorker.register('/static/sw.js',{scope:'/'}).catch(()=>{})); }\nfetch('/api/health').then(r=>r.json()).then(d=>{$('apiStatus').textContent='Backend online · FFmpeg '+(d.ffmpeg_available?'ready':'missing')+' · FFprobe '+(d.ffprobe_available?'ready':'missing')+' · Upload cap '+d.max_upload_mb+' MB · pipeline '+d.pipeline_version;}).catch(()=>$('apiStatus').textContent='Backend status unavailable. Refresh or check the deployment logs.');
 $('audioVolume').addEventListener('input',()=>{$('volumeLabel').textContent=Math.round(Number($('audioVolume').value)*100)+'%';});
 $('saveBriefBtn').addEventListener('click',()=>{const brief={projectType:$('projectType').value,editBrief:$('editBrief').value,targetDuration:$('targetDuration').value,language:$('language').value,savedAt:new Date().toISOString()};try{localStorage.setItem('mindOfAkEditBrief',JSON.stringify(brief));$('briefResult').textContent='Brief saved in this browser on this device. It is not uploaded to the server or sent to an AI model.';}catch(e){$('briefResult').textContent='Could not save this brief in local browser storage.';}});
 try{const saved=JSON.parse(localStorage.getItem('mindOfAkEditBrief')||'null');if(saved){$('projectType').value=saved.projectType||$('projectType').value;$('editBrief').value=saved.editBrief||'';$('targetDuration').value=saved.targetDuration||45;$('language').value=saved.language||'Tamil';}}catch(e){}

@@ -29,6 +29,12 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 
 The roadmap takes inspiration from professional editing workflows (timeline control, precise trimming, audio mixing, color management, captions, proxy workflows, and export presets) without copying proprietary source code, brand assets, or protected UI designs from other products.
 
+## Install on iPad
+
+The app now includes a web app manifest and a network-only service worker so supported browsers can offer an installable app experience. On iPad, open the HTTPS site in Safari, tap **Share**, then choose **Add to Home Screen**. The installed shortcut opens in a standalone window where supported.
+
+The service worker intentionally does not cache authenticated pages, APIs, uploaded media, or exports. This avoids leaving private footage in a browser cache, but means the app is not an offline editor. A working internet connection and successful owner sign-in are still required. PWA installation does not itself add authentication; configure the owner gate first.
+
 ## Run locally
 
 ```bash
