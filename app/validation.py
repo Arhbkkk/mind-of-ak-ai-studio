@@ -147,3 +147,33 @@ def compare_script_to_transcript(script: str, transcript: str | None) -> dict[st
         "missing_or_changed_words": missing[:100],
         "extra_or_changed_words": extra[:100],
     }
+
+
+def validate_timeline_segments(segments: Any, source_duration: float, max_clips: int = 12, max_total_duration: float = 300.0) -> list[tuple[float, float]]:
+    """Validate ordered edit ranges against one source and return normalized ranges."""
+    if not isinstance(segments, list) or not 1 <= len(segments) <= max_clips:
+        raise ValueError(f"Timeline must contain between 1 and {max_clips} clips.")
+    try:
+        duration = float(source_duration)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Source duration must be numeric.") from exc
+    if not duration > 0:
+        raise ValueError("Source duration must be positive.")
+
+    ranges: list[tuple[float, float]] = []
+    total = 0.0
+    for item in segments:
+        if not isinstance(item, dict):
+            raise ValueError("Each timeline clip must be an object.")
+        try:
+            start, end = float(item["start"]), float(item["end"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Each clip needs numeric start and end values.") from exc
+        if not (0 <= start < end <= duration + 0.05) or end - start < 0.1:
+            raise ValueError("Timeline clip range is outside the source or too short.")
+        end = min(end, duration)
+        ranges.append((start, end))
+        total += end - start
+    if total > max_total_duration:
+        raise ValueError(f"Combined timeline duration cannot exceed {int(max_total_duration // 60)} minutes.")
+    return ranges
