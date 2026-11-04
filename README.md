@@ -24,7 +24,7 @@ The owner-only project workspace is now wired into the website UI and backend:
 - Three creator profiles: `mind-of-ak`, `kids-stories`, and `mind-relax-bgm`.
 - Project manifests persist through a provider-neutral object-store interface. Cloudflare R2 is selected when the `R2_*` variables are configured; local storage is only a development fallback.
 
-Before deploying this branch, set `OWNER_PASSWORD` in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The public `/api/health` endpoint remains available for host health checks.
+Before deploying this branch, set the same `OWNER_PASSWORD` as a Cloudflare Worker secret and in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub or a Wrangler vars file. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
 
 The gallery currently persists project manifests, script/notes, subtitles and timeline JSON only. It does not yet upload project media, create generated assets, or provide a multi-track editor. Local fallback storage on Render is ephemeral.
 
