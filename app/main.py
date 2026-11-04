@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles
+from app import job_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -48,7 +49,8 @@ def cleanup_old_files() -> None:
 
 cleanup_old_files()
 
-app = FastAPI(title="Mind of AK AI Studio", version="0.4.0")
+app = FastAPI(title="Mind of AK AI Studio", version="0.5.0")
+job_store.init_db()
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
@@ -416,10 +418,7 @@ async def _render_export_now(
 
 
 
-# In-process render jobs keep long FFmpeg work out of the browser's initial HTTP request.
-# For multi-instance/production reliability, replace this dictionary with a durable queue.
-_EXPORT_JOBS: dict[str, dict] = {}
-
+# Render jobs persist in SQLite; a separate worker executes FFmpeg.
 @app.post("/api/export")
 async def start_export(
     stored_name: str = Form(...),
@@ -433,66 +432,37 @@ async def start_export(
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
 ) -> dict:
-    # The worker runs FFmpeg with a 240-second timeout. Clear any in-memory job
-    # that has exceeded a generous 5-minute deadline, otherwise a killed worker
-    # can leave exports permanently locked until the next service restart.
-    now = time.time()
-    for stale_id, stale_job in list(_EXPORT_JOBS.items()):
-        if stale_job.get("status") in ("queued", "running"):
-            started_at = stale_job.get("started_at", stale_job.get("created_at", now))
-            if now - started_at > 300:
-                stale_job.update(status="failed", progress=0,
-                                 error="Export timed out or its worker stopped. Please start a new export.")
-                print(f"EXPORT_JOB_STALE id={stale_id} age_seconds={int(now - started_at)}", flush=True)
-    # This single-process service has no external queue; reject only active renders.
-    if any(job.get("status") in ("queued", "running") for job in _EXPORT_JOBS.values()):
-        raise HTTPException(status_code=429, detail="Another export is still running. Wait for it to finish before starting another render.")
-    # Fail fast for missing sources; the render itself runs asynchronously.
     safe_upload(stored_name)
-    job_id = uuid.uuid4().hex
-    _EXPORT_JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Render queued.", "created_at": time.time(), "started_at": time.time()}
-
-    async def run_job() -> None:
-        _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
-        print(f"EXPORT_JOB_START id={job_id} preset={preset} framing={framing} resolution={resolution}", flush=True)
-        try:
-            result = await _render_export_now(
-                stored_name=stored_name,
-                preset=preset,
-                framing=framing,
-                resolution=resolution,
-                quality=quality,
-                start_seconds=start_seconds,
-                end_seconds=end_seconds,
-                color_style=color_style,
-                fade_seconds=fade_seconds,
-                audio_volume=audio_volume,
-            )
-            _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
-            print(f"EXPORT_JOB_COMPLETE id={job_id} bytes={result.get('size_bytes')}", flush=True)
-        except HTTPException as exc:
-            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=str(exc.detail))
-            print(f"EXPORT_JOB_FAILED id={job_id} status={exc.status_code} error={exc.detail}", flush=True)
-        except Exception as exc:
-            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=f"Unexpected render error: {type(exc).__name__}: {exc}")
-            print(f"EXPORT_JOB_CRASH id={job_id} error={type(exc).__name__}: {exc}", flush=True)
-
-    asyncio.create_task(run_job())
-    return {"ok": True, "job_id": job_id, "status": "queued", "status_url": f"/api/export-status/{job_id}"}
+    payload = {
+        "stored_name": stored_name, "preset": preset, "framing": framing,
+        "resolution": resolution, "quality": quality,
+        "start_seconds": start_seconds, "end_seconds": end_seconds,
+        "color_style": color_style, "fade_seconds": fade_seconds,
+        "audio_volume": audio_volume,
+    }
+    try:
+        job_id = job_store.enqueue(payload, max_active=5)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {"ok": True, "job_id": job_id, "status": "queued",
+            "status_url": f"/api/export-status/{job_id}"}
 
 
 @app.get("/api/export-status/{job_id}")
 async def export_status(job_id: str) -> dict:
     if not re.fullmatch(r"[a-f0-9]{32}", job_id):
         raise HTTPException(status_code=400, detail="Invalid render job ID.")
-    job = _EXPORT_JOBS.get(job_id)
+    job = job_store.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Render job not found. The service may have restarted; please submit the export again.")
-    response = {"ok": True, "job_id": job_id, "status": job["status"], "progress": job.get("progress", 0), "message": job.get("message", "")}
+        raise HTTPException(status_code=404, detail="Render job not found.")
+    response = {
+        "ok": True, "job_id": job_id, "status": job["status"],
+        "progress": job["progress"], "message": job["message"],
+    }
     if job["status"] == "completed":
         response["result"] = job["result"]
     elif job["status"] == "failed":
-        response["error"] = job.get("error", "Unknown render failure.")
+        response["error"] = job["error"] or "Unknown render failure."
     return response
 
 
