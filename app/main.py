@@ -24,6 +24,7 @@ EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
 MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "2048")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "300")))
+MAX_RENDER_EDGE = max(640, int(os.getenv("MAX_RENDER_EDGE", "640")))
 TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -94,6 +95,7 @@ async def health() -> dict:
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
+        "max_render_edge": MAX_RENDER_EDGE,
         "pipeline_version": "0.5.0",
         "validation_endpoint": "/api/validate",
     }
@@ -334,13 +336,10 @@ async def _render_export_now(
         }
         target_width, target_height = dimensions[resolution][preset]
 
-    # Render instances on the free 512 MiB plan can be OOM-killed by 1080p/4K
-    # blur graphs. Cap the actual render canvas to 720p-class dimensions while
-    # keeping the selected aspect ratio; higher resolution presets are advisory
-    # only on this constrained host.
-    max_render_edge = 640
-    if max(target_width, target_height) > max_render_edge:
-        ratio = max_render_edge / max(target_width, target_height)
+    # Keep low-memory deployments safe by default, but let larger hosts opt in
+    # to higher output dimensions through MAX_RENDER_EDGE.
+    if max(target_width, target_height) > MAX_RENDER_EDGE:
+        ratio = MAX_RENDER_EDGE / max(target_width, target_height)
         target_width = max(2, int(target_width * ratio) // 2 * 2)
         target_height = max(2, int(target_height * ratio) // 2 * 2)
 
