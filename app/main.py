@@ -586,6 +586,7 @@ async def _render_timeline_now(
     concat_file = EXPORT_DIR / f"ak_concat_{uuid.uuid4().hex}.txt"
     final_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     final_path = EXPORT_DIR / final_name
+    completed = False
     try:
         for start, end in ranges:
             part_srt = _slice_srt_for_source_range(subtitle_srt, start, end)
@@ -631,6 +632,7 @@ async def _render_timeline_now(
         if duration <= 0 or not video:
             raise HTTPException(status_code=422, detail="Timeline export is missing a valid video stream.")
         cleanup_old_files()
+        completed = True
         return {
             "ok": True,
             "filename": final_name,
@@ -652,7 +654,7 @@ async def _render_timeline_now(
         concat_file.unlink(missing_ok=True)
         for part in parts:
             part.unlink(missing_ok=True)
-        if not final_path.exists():
+        if not completed:
             final_path.unlink(missing_ok=True)
 
 
