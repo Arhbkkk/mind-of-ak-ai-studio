@@ -29,6 +29,14 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 
 The roadmap takes inspiration from professional editing workflows (timeline control, precise trimming, audio mixing, color management, captions, proxy workflows, and export presets) without copying proprietary source code, brand assets, or protected UI designs from other products.
 
+## Durable render queue (Phase 3 foundation)
+
+- Render requests are persisted in SQLite rather than an in-memory dictionary.
+- The API enqueues work; a separate worker process executes FFmpeg.
+- Queue state is shared across API and worker processes and survives API restarts.
+- This starter queue is for one EC2 host and one worker, not a multi-instance distributed queue.
+- Progress currently reports queue/worker state, not exact FFmpeg frame percentage.
+
 ## Run locally
 
 ```bash
@@ -57,6 +65,10 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 - `MAX_UPLOAD_MB`: upload limit (default 2048 MB). Set this to a value your hosting platform can safely accept.
 - `UPLOAD_DIR`: source upload directory (default `/tmp/mind-of-ak-uploads`).
 - `EXPORT_DIR`: rendered output directory (default `/tmp/mind-of-ak-exports`).
+
+## AWS deployment
+
+See [deploy/aws/README.md](deploy/aws/README.md) and [docker-compose.yml](docker-compose.yml). The Compose setup keeps the API bound to localhost and runs a separate worker with persistent shared storage. Public exposure is intentionally not enabled because authentication and TLS are not implemented.
 
 ## Deployment and safety notes
 
