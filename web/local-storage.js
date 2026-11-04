@@ -172,7 +172,30 @@
     }
     try {
       await openDb();
-      $("importLocalBtn").addEventListener("click", importFiles);\n      $("videoFile").addEventListener("change", async () => {\n        const file = $("videoFile").files && $("videoFile").files[0];\n        if (!file) return;\n        try { await saveBlob(file, file.name, file.type); say("Source saved locally: " + file.name + ". Upload to the render server separately when you are ready."); }\n        catch (error) { say("Could not save a local copy of the source: " + (error.message || error), true); }\n      });\n      window.addEventListener("mindofak:export-ready", async event => {\n        const detail = event.detail || {};\n        const button = document.createElement("button");\n        button.type = "button"; button.className = "btn secondary"; button.textContent = "Save MP4 in local library";\n        button.addEventListener("click", async () => {\n          button.disabled = true; button.textContent = "Saving…";\n          try {\n            const response = await fetch(detail.url, { cache: "no-store" });\n            if (!response.ok) throw new Error("Could not download the rendered MP4 (HTTP " + response.status + ").");\n            const blob = await response.blob();\n            await saveBlob(blob, detail.name || "mind-of-ak-export.mp4", blob.type || "video/mp4");\n            say("Rendered MP4 saved in the local library.");\n            button.textContent = "Saved locally";\n          } catch (error) { button.disabled = false; button.textContent = "Save MP4 in local library"; say(error.message || String(error), true); }\n        });\n        $("exportResult").append(document.createElement("br"), button);\n      });
+      $("importLocalBtn").addEventListener("click", importFiles);
+      $("videoFile").addEventListener("change", async () => {
+        const file = $("videoFile").files && $("videoFile").files[0];
+        if (!file) return;
+        try { await saveBlob(file, file.name, file.type); say("Source saved locally: " + file.name + ". Upload to the render server separately when you are ready."); }
+        catch (error) { say("Could not save a local copy of the source: " + (error.message || error), true); }
+      });
+      window.addEventListener("mindofak:export-ready", async event => {
+        const detail = event.detail || {};
+        const button = document.createElement("button");
+        button.type = "button"; button.className = "btn secondary"; button.textContent = "Save MP4 in local library";
+        button.addEventListener("click", async () => {
+          button.disabled = true; button.textContent = "Saving…";
+          try {
+            const response = await fetch(detail.url, { cache: "no-store" });
+            if (!response.ok) throw new Error("Could not download the rendered MP4 (HTTP " + response.status + ").");
+            const blob = await response.blob();
+            await saveBlob(blob, detail.name || "mind-of-ak-export.mp4", blob.type || "video/mp4");
+            say("Rendered MP4 saved in the local library.");
+            button.textContent = "Saved locally";
+          } catch (error) { button.disabled = false; button.textContent = "Save MP4 in local library"; say(error.message || String(error), true); }
+        });
+        $("exportResult").append(document.createElement("br"), button);
+      });
       $("refreshLocalBtn").addEventListener("click", () => renderLibrary().then(() => say("Local library refreshed.")).catch(e => say(e.message, true)));
       await renderLibrary();
       let persistent = false;
