@@ -23,3 +23,5 @@ services:
         sync: false
       - key: ALLOWED_ORIGINS
         value: https://studio.ammaappallub.workers.dev,https://mind-of-ak-ai-studio.onrender.com
+      - key: MAX_DIRECT_UPLOAD_MB
+        value: "2048"
