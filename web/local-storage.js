@@ -124,6 +124,16 @@
     say("Export requested for " + item.name + ". On iPad, use the share/download flow to save it into Files if prompted.");
   }
 
+  async function saveBlob(blob, name, type) {
+    const id = (crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random().toString(16).slice(2));
+    await withStore("readwrite", store => store.put({
+      id, name, type: type || blob.type || "application/octet-stream",
+      size: blob.size, lastModified: Date.now(), createdAt: Date.now(), blob
+    }));
+    await renderLibrary();
+    return id;
+  }
+
   async function importFiles() {
     const files = Array.from($("localMediaFiles").files || []);
     if (!files.length) { say("Choose one or more files from Files first.", true); return; }
@@ -162,7 +172,7 @@
     }
     try {
       await openDb();
-      $("importLocalBtn").addEventListener("click", importFiles);
+      $("importLocalBtn").addEventListener("click", importFiles);\n      $("videoFile").addEventListener("change", async () => {\n        const file = $("videoFile").files && $("videoFile").files[0];\n        if (!file) return;\n        try { await saveBlob(file, file.name, file.type); say("Source saved locally: " + file.name + ". Upload to the render server separately when you are ready."); }\n        catch (error) { say("Could not save a local copy of the source: " + (error.message || error), true); }\n      });\n      window.addEventListener("mindofak:export-ready", async event => {\n        const detail = event.detail || {};\n        const button = document.createElement("button");\n        button.type = "button"; button.className = "btn secondary"; button.textContent = "Save MP4 in local library";\n        button.addEventListener("click", async () => {\n          button.disabled = true; button.textContent = "Saving…";\n          try {\n            const response = await fetch(detail.url, { cache: "no-store" });\n            if (!response.ok) throw new Error("Could not download the rendered MP4 (HTTP " + response.status + ").");\n            const blob = await response.blob();\n            await saveBlob(blob, detail.name || "mind-of-ak-export.mp4", blob.type || "video/mp4");\n            say("Rendered MP4 saved in the local library.");\n            button.textContent = "Saved locally";\n          } catch (error) { button.disabled = false; button.textContent = "Save MP4 in local library"; say(error.message || String(error), true); }\n        });\n        $("exportResult").append(document.createElement("br"), button);\n      });
       $("refreshLocalBtn").addEventListener("click", () => renderLibrary().then(() => say("Local library refreshed.")).catch(e => say(e.message, true)));
       await renderLibrary();
       let persistent = false;
