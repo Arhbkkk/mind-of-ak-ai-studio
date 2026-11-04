@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.validation import compare_script_to_transcript, validate_subtitles
+from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
 from app import job_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -277,6 +277,7 @@ async def _render_export_now(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    subtitle_srt: str = Form(""),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -302,6 +303,19 @@ async def _render_export_now(
         raise HTTPException(status_code=413, detail="This starter export supports up to 5 minutes per render. Shorten the clip and retry.")
 
     clip_duration = effective_end - start_seconds
+    subtitle_file = None
+    subtitle_filter = None
+    if subtitle_srt.strip():
+        try:
+            cues = parse_srt(subtitle_srt)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
+        subtitle_check = validate_subtitles(subtitle_srt, clip_duration)
+        if subtitle_check["status"] == "FAIL":
+            raise HTTPException(status_code=422, detail="Subtitle timestamps must fit inside the selected export clip. Use clip-relative timestamps starting at 00:00:00,000.")
+        subtitle_file = EXPORT_DIR / f"ak_subtitles_{uuid.uuid4().hex}.srt"
+        subtitle_file.write_text(subtitle_srt, encoding="utf-8")
+        subtitle_filter = f"subtitles=filename={subtitle_file.as_posix()}"
     if not 0 <= fade_seconds <= 3:
         raise HTTPException(status_code=422, detail="Fade duration must be between 0 and 3 seconds.")
     if fade_seconds * 2 > clip_duration:
@@ -358,6 +372,8 @@ async def _render_export_now(
         "mono": "hue=s=0,eq=contrast=1.08",
     }
     video_filters = base_filters + [looks[color_style]]
+    if subtitle_filter:
+        video_filters.append(subtitle_filter)
     if fade_seconds > 0:
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
@@ -381,9 +397,14 @@ async def _render_export_now(
         )
         if fade_seconds > 0:
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
+        if subtitle_filter:
+            complex_filters += f",{subtitle_filter}"
         command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
     elif framing == "blur" and preset == "original":
-        command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
+        original_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else [])
+        if subtitle_filter:
+            original_filters.append(subtitle_filter)
+        command.extend(["-vf", ",".join(original_filters)])
     else:
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
     command.extend([
@@ -391,7 +412,11 @@ async def _render_export_now(
         "-c:v", "libx264", "-threads", "1", "-preset", "ultrafast", "-crf", crf,
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
     ])
-    result = await run_command(command, timeout=240)
+    try:
+        result = await run_command(command, timeout=240)
+    finally:
+        if subtitle_file is not None:
+            subtitle_file.unlink(missing_ok=True)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
@@ -412,7 +437,8 @@ async def _render_export_now(
         "color_style": color_style,
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
-        "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
+        "subtitles_burned_in": bool(subtitle_srt.strip()),
+        "message": "Export completed with framing, color look, optional fades, audio volume and optional burned-in SRT subtitles. AI-directed editing is not included yet.",
     }
 
 
