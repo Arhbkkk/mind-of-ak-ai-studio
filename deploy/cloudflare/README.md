@@ -1,52 +1,57 @@
-# Cloudflare deployment
+# Free-first deployment
 
-This deployment path uses a Worker for API routing, Worker Static Assets for the browser UI, and Cloudflare Containers for the existing Python/FastAPI + FFmpeg application.
+This deployment separates the static frontend from the Python/FFmpeg API:
 
-## Cost
+- Cloudflare Worker Static Assets serves the PWA frontend.
+- The Cloudflare Worker proxies same-origin `/api/*` requests to the API origin configured in its `API_ORIGIN` variable.
+- Render runs the existing Dockerized FastAPI + FFmpeg service using the free web-service plan.
 
-Cloudflare Workers Free cannot host the FFmpeg process. Cloudflare Containers are not available on the Free plan. Workers Paid starts at US$5/month and includes a limited Containers allowance; extra CPU, memory, disk and egress can be billed. Check current pricing before enabling billing:
-https://developers.cloudflare.com/containers/platform/pricing/
+## Cost and reliability limits
 
-R2 standard storage currently includes 10 GB-month, 1 million Class A operations and 10 million Class B operations per month, with no egress fees. Usage above the allowance is billed:
-https://developers.cloudflare.com/r2/pricing/
+This is a free-first prototype, not a production media platform.
 
-## Current implementation scope
+- Render free web services can spin down after inactivity and take time to wake.
+- The free service has an ephemeral filesystem. Uploaded videos, exports and SQLite job state can disappear after restarts/redeploys. Do not treat it as durable storage.
+- Free compute has limited memory/CPU. The blueprint limits uploads to 50 MB, source duration to 180 seconds and output long edge to 640 pixels. FFmpeg may still fail on some videos.
+- The Render service may have monthly usage limits or plan changes. Check the current Render dashboard before deploying.
+- Cloudflare Worker Static Assets and the API proxy do not require Cloudflare Containers. This configuration removes the paid Container binding.
+- No authentication or per-user project isolation is implemented. Do not upload confidential or sensitive footage to this public prototype.
 
-- Worker routes /api/* to one named Container instance.
-- Static asset binding serves the existing web/ interface.
-- Container image reuses the repository Dockerfile.
-- Wrangler config declares the Container Durable Object binding.
+## Deploy the API on Render
 
-## Production blockers
+1. Open the Render dashboard and choose **New → Blueprint**.
+2. Connect the GitHub repository `Arhbkkk/mind-of-ak-ai-studio`.
+3. Select the branch containing this configuration, currently `feat/aws-render-foundation`.
+4. Review the `mind-of-ak-api` service and confirm the plan is **Free** before applying.
+5. Let the Docker build and deploy finish.
+6. Open the service's URL and verify `/api/health` returns JSON with `"ok": true`. Save the service origin, for example `https://mind-of-ak-api.onrender.com`.
 
-1. The current FastAPI app writes uploads, exports and SQLite job state to local filesystem paths. Container-local files must not be treated as durable media storage. R2 media integration and durable job-state design are still required.
-2. FastAPI and the render worker must run together in the Container. The Cloudflare entrypoint added here starts both; Docker Compose can still override the container command locally.
-3. There is no authentication, user isolation, ownership, CSRF protection or quota enforcement. Do not publish the app publicly until these are implemented and reviewed.
-4. This starter config uses one Container instance; it is not yet a multi-user production architecture.
-5. Docker must be running locally when Wrangler builds the image. First deployment can take several minutes to provision.
+Do not add a paid instance or persistent disk for this prototype.
 
-## Prerequisites
+## Connect Cloudflare to the API
 
-- Cloudflare account with Workers Paid enabled for Containers.
-- Node.js and npm.
-- Docker Desktop or another Docker-compatible engine running.
-- Wrangler authenticated with the Cloudflare account using npx wrangler login.
+1. Open Cloudflare → Workers & Pages → `mind-of-ak-ai-studio`.
+2. Open **Settings → Variables and Secrets** (the label may vary).
+3. Add a plain-text variable named `API_ORIGIN`.
+4. Set its value to the Render service origin only, for example `https://mind-of-ak-api.onrender.com` (no trailing path such as `/api`).
+5. Save and redeploy the Worker if Cloudflare requests it.
+
+The frontend continues calling same-origin `/api/*`; the Worker forwards those requests to Render. No API key is placed in browser JavaScript.
+
+## Verify
+
+- Open the Cloudflare `workers.dev` app URL.
+- The backend status panel should show FFmpeg and FFprobe availability.
+- Test with a small, non-important video first.
+- A sleeping free Render service may take a minute or more to wake; wait for the request rather than repeatedly submitting it.
 
 ## Local checks
 
 ```bash
 npm install
 npx wrangler types
-npx wrangler dev
+npx tsc --noEmit
+node --check web/local-storage.js
 ```
 
-## Deploy
-
-Only after reviewing billing and creating required Cloudflare resources:
-
-```bash
-npx wrangler deploy
-npx wrangler containers list
-```
-
-This repository change does not log in to Cloudflare, create buckets, enable billing, or deploy resources. Those actions require account-owner authorization.
+The Worker config no longer declares Containers or a Container Durable Object. The old Cloudflare Container deployment is not used by this free-first architecture.
