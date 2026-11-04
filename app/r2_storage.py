@@ -206,7 +206,7 @@ def presign_saved_export(filename: str, expires_in: int = 900) -> str:
         raise ValueError("Invalid export filename.")
     return client().generate_presigned_url(
         "get_object",
-        Params={"Bucket": os.environ["R2_BUCKET"], "Key": f"saved/{filename}"},
+        Params={"Bucket": os.environ["R2_BUCKET"], "Key": f"saved/{filename}", "ResponseContentDisposition": 'attachment; filename="mind-of-ak-export.mp4"', "ResponseContentType": "video/mp4"},
         ExpiresIn=max(60, min(int(expires_in), 3600)),
         HttpMethod="GET",
     )
