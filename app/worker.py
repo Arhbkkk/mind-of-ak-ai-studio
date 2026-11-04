@@ -21,6 +21,7 @@ async def process_job(job):
         log.exception("Render job %s failed",job_id)
 async def main():
     job_store.init_db()
+    job_store.recover_interrupted_jobs()
     while not stopping:
         job=job_store.claim_next()
         if job is None: await asyncio.sleep(POLL_SECONDS)
