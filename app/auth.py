@@ -9,6 +9,7 @@ import base64
 import binascii
 import hmac
 import os
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -49,4 +50,14 @@ def install_owner_gate(app: FastAPI) -> None:
                 headers={"WWW-Authenticate": 'Basic realm="Mind of AK AI Studio", charset="UTF-8"'},
                 media_type="text/plain",
             )
+
+        # Basic authentication is browser-managed; require a same-origin Origin
+        # header on state-changing requests to reduce cross-site request forgery.
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            origin = request.headers.get("origin")
+            host = request.headers.get("host", "").lower()
+            parsed = urlsplit(origin or "")
+            if not origin or parsed.netloc.lower() != host or parsed.scheme not in {"http", "https"}:
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin state changes are not allowed."})
+
         return await call_next(request)
