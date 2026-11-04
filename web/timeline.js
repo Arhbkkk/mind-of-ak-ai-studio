@@ -126,7 +126,7 @@
     setStatus("Timeline reset to one full-length source clip.");
   });
   playheadButton.addEventListener("click", () => {
-    if (state.duration) preview.currentTime = Math.min(state.duration, Math.max(0, preview.currentTime));
+    const clip = selected();\n    if (clip) preview.currentTime = clip.start;
   });
   window.addEventListener("ak:source-ready", (event) => {
     const duration = Number(event.detail?.duration || 0);
