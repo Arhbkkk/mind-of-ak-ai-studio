@@ -8,6 +8,7 @@ services:
       EXPORT_DIR: /data/exports
       MAX_UPLOAD_MB: "50"
       MAX_SOURCE_DURATION_SECONDS: "180"
+      MAX_RENDER_EDGE: "640"
       TEMP_FILE_MAX_AGE_SECONDS: "43200"
     volumes: [studio-data:/data]
     ports: ["127.0.0.1:8000:8000"]
