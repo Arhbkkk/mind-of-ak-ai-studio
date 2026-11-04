@@ -140,6 +140,13 @@ def find_project_source_key(stored_name: str) -> str | None:
     return None
 
 
+def delete_project_source(project_id: str, stored_name: str) -> None:
+    _validate_project_id(project_id)
+    _validate_stored_name(stored_name)
+    key = f"owners/owner/projects/{project_id}/media/{stored_name}"
+    client().delete_object(Bucket=os.environ["R2_BUCKET"], Key=key)
+
+
 def presign_project_source(stored_name: str, expires_in: int = 900) -> str:
     key = find_project_source_key(stored_name)
     if not key:
