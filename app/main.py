@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
+from app.subtitles import build_subtitle_filter
 from app import job_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -278,6 +279,9 @@ async def _render_export_now(
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
     subtitle_srt: str = Form(""),
+    subtitle_size: int = Form(36),
+    subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
+    subtitle_color: Literal["white", "yellow"] = Form("white"),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -327,7 +331,7 @@ async def _render_export_now(
     if subtitle_srt.strip():
         subtitle_file = EXPORT_DIR / f"ak_subtitles_{uuid.uuid4().hex}.srt"
         subtitle_file.write_text(subtitle_srt, encoding="utf-8")
-        subtitle_filter = f"subtitles=filename={subtitle_file.as_posix()}"
+        subtitle_filter = build_subtitle_filter(subtitle_file, subtitle_size, subtitle_position, subtitle_color)
 
     output_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     output = EXPORT_DIR / output_name
@@ -462,6 +466,10 @@ async def start_export(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    subtitle_srt: str = Form(""),
+    subtitle_size: int = Form(36),
+    subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
+    subtitle_color: Literal["white", "yellow"] = Form("white"),
 ) -> dict:
     safe_upload(stored_name)
     payload = {
@@ -470,6 +478,10 @@ async def start_export(
         "start_seconds": start_seconds, "end_seconds": end_seconds,
         "color_style": color_style, "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
+        "subtitle_srt": subtitle_srt,
+        "subtitle_size": subtitle_size,
+        "subtitle_position": subtitle_position,
+        "subtitle_color": subtitle_color,
     }
     try:
         job_id = job_store.enqueue(payload, max_active=5)
