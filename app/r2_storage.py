@@ -115,15 +115,24 @@ def promote_source(stored_name: str, project_id: str) -> str:
     _validate_stored_name(stored_name)
     _validate_project_id(project_id)
     storage = client()
-    source_key = f"temporary/{stored_name}"
+    temporary_key = f"temporary/{stored_name}"
     target_key = f"owners/owner/projects/{project_id}/media/{stored_name}"
-    storage.copy_object(
-        Bucket=os.environ["R2_BUCKET"],
-        Key=target_key,
-        CopySource={"Bucket": os.environ["R2_BUCKET"], "Key": source_key},
-        MetadataDirective="COPY",
-    )
-    storage.delete_object(Bucket=os.environ["R2_BUCKET"], Key=source_key)
+    source_key = temporary_key
+    try:
+        storage.head_object(Bucket=os.environ["R2_BUCKET"], Key=temporary_key)
+    except Exception:
+        source_key = find_project_source_key(stored_name) or ""
+        if not source_key:
+            raise FileNotFoundError("Source media is no longer available in temporary or saved project storage.")
+    if source_key != target_key:
+        storage.copy_object(
+            Bucket=os.environ["R2_BUCKET"],
+            Key=target_key,
+            CopySource={"Bucket": os.environ["R2_BUCKET"], "Key": source_key},
+            MetadataDirective="COPY",
+        )
+        if source_key == temporary_key:
+            storage.delete_object(Bucket=os.environ["R2_BUCKET"], Key=source_key)
     return target_key
 
 
@@ -147,10 +156,10 @@ def delete_project_source(project_id: str, stored_name: str) -> None:
     client().delete_object(Bucket=os.environ["R2_BUCKET"], Key=key)
 
 
-def presign_project_source(stored_name: str, expires_in: int = 900) -> str:
-    key = find_project_source_key(stored_name)
-    if not key:
-        raise FileNotFoundError("Project source media was not found.")
+def presign_project_source(project_id: str, stored_name: str, expires_in: int = 900) -> str:
+    _validate_project_id(project_id)
+    _validate_stored_name(stored_name)
+    key = f"owners/owner/projects/{project_id}/media/{stored_name}"
     return client().generate_presigned_url(
         "get_object",
         Params={"Bucket": os.environ["R2_BUCKET"], "Key": key},
