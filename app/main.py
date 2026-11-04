@@ -200,6 +200,7 @@ async def storage_multipart_initiate(request: Request) -> dict:
         result = r2_storage.begin_upload(
             str(data.get("filename", "")),
             str(data.get("content_type", "application/octet-stream")),
+            int(data.get("size_bytes", 0)),
         )
         return {"ok": True, **result}
     except ValueError as exc:
