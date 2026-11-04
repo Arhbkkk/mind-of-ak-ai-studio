@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
+from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt, validate_timeline_segments
 from app.subtitles import build_subtitle_filter
 from app import job_store
 from app.auth import install_owner_gate
@@ -526,6 +526,134 @@ async def _render_export_now(
         "message": "Export completed with framing, color look, optional fades, audio volume and optional burned-in SRT subtitles. AI-directed editing is not included yet.",
     }
 
+
+
+def _srt_timestamp(seconds: float) -> str:
+    millis = max(0, int(round(seconds * 1000)))
+    hours, remainder = divmod(millis, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
+
+
+def _slice_srt_for_source_range(srt_text: str, source_start: float, source_end: float) -> str:
+    """Clip source-relative subtitle cues and remap them to one timeline segment."""
+    if not srt_text.strip():
+        return ""
+    output = []
+    for cue in parse_srt(srt_text):
+        start = max(cue["start_seconds"], source_start)
+        end = min(cue["end_seconds"], source_end)
+        if end <= start:
+            continue
+        output.append(
+            f"{len(output) + 1}\\n{_srt_timestamp(start - source_start)} --> "
+            f"{_srt_timestamp(end - source_start)}\\n{cue['text']}"
+        )
+    return "\\n\\n".join(output)
+
+
+async def _render_timeline_now(
+    stored_name: str,
+    segments: list[dict],
+    preset: str,
+    framing: str,
+    resolution: str,
+    quality: str,
+    start_seconds: float,
+    end_seconds: float,
+    color_style: str,
+    fade_seconds: float,
+    audio_volume: float,
+    subtitle_srt: str,
+    subtitle_size: int,
+    subtitle_position: str,
+    subtitle_color: str,
+) -> dict:
+    """Render ordered ranges from one source and concatenate their MP4 outputs."""
+    source = safe_upload(stored_name)
+    probe = await run_command([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(source)
+    ], timeout=20)
+    try:
+        source_duration = float(probe.stdout.strip())
+        ranges = validate_timeline_segments(segments, source_duration)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid timeline: {exc}") from exc
+
+    parts: list[Path] = []
+    concat_file = EXPORT_DIR / f"ak_concat_{uuid.uuid4().hex}.txt"
+    final_name = f"ak_export_{uuid.uuid4().hex}.mp4"
+    final_path = EXPORT_DIR / final_name
+    try:
+        for start, end in ranges:
+            part_srt = _slice_srt_for_source_range(subtitle_srt, start, end)
+            part = await _render_export_now(
+                stored_name=stored_name,
+                preset=preset,
+                framing=framing,
+                resolution=resolution,
+                quality=quality,
+                start_seconds=start,
+                end_seconds=end,
+                color_style=color_style,
+                fade_seconds=fade_seconds,
+                audio_volume=audio_volume,
+                subtitle_srt=part_srt,
+                subtitle_size=subtitle_size,
+                subtitle_position=subtitle_position,
+                subtitle_color=subtitle_color,
+            )
+            parts.append(EXPORT_DIR / part["filename"])
+
+        concat_file.write_text(
+            "".join("file '" + str(path).replace("'", "'\\''") + "'\\n" for path in parts),
+            encoding="utf-8",
+        )
+        joined = await run_command([
+            "ffmpeg", "-hide_banner", "-threads", "1", "-f", "concat",
+            "-safe", "0", "-i", str(concat_file), "-c", "copy",
+            "-movflags", "+faststart", "-y", str(final_path)
+        ], timeout=240)
+        if joined.returncode != 0 or not final_path.is_file() or final_path.stat().st_size == 0:
+            raise HTTPException(status_code=422, detail="Timeline concatenation failed: " + (joined.stderr or "")[-1000:])
+
+        verify = await run_command([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-show_entries", "stream=width,height", "-of", "json", str(final_path)
+        ], timeout=20)
+        if verify.returncode != 0:
+            raise HTTPException(status_code=422, detail="Could not verify the timeline export.")
+        metadata = json.loads(verify.stdout)
+        video = next((item for item in metadata.get("streams", []) if item.get("codec_type") == "video"), {})
+        duration = float(metadata.get("format", {}).get("duration") or 0)
+        if duration <= 0 or not video:
+            raise HTTPException(status_code=422, detail="Timeline export is missing a valid video stream.")
+        cleanup_old_files()
+        return {
+            "ok": True,
+            "filename": final_name,
+            "download_url": f"/api/download/{final_name}",
+            "size_bytes": final_path.stat().st_size,
+            "duration_seconds": round(duration, 2),
+            "preset": preset,
+            "framing": framing,
+            "resolution": resolution,
+            "output_width": video.get("width"),
+            "output_height": video.get("height"),
+            "quality": quality,
+            "color_style": color_style,
+            "timeline_clips": len(ranges),
+            "subtitles_burned_in": bool(subtitle_srt.strip()),
+            "message": "Ordered timeline clips rendered and joined with hard cuts. Transitions and multiple source files are not supported yet.",
+        }
+    finally:
+        concat_file.unlink(missing_ok=True)
+        for part in parts:
+            part.unlink(missing_ok=True)
+        if not final_path.exists():
+            final_path.unlink(missing_ok=True)
 
 
 # Render jobs persist in SQLite; a separate worker executes FFmpeg.
