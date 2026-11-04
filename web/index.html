@@ -281,26 +281,33 @@ if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.se
         timeline: { tracks: clips.length ? [{ id: "video-main", type: "video", clips }] : [] }
       };
       let saved = (await api("/api/projects/" + encodeURIComponent(state.active.id), { method: "PUT", body: JSON.stringify(payload) })).project;
+      let mediaWarning = "";
       if (storedName && !(saved.source_media || []).some((item) => item.stored_name === storedName)) {
         const storage = await api("/api/storage/status");
         if (storage.enabled) {
-          const attached = await api("/api/projects/" + encodeURIComponent(state.active.id) + "/media", {
-            method: "POST",
-            body: JSON.stringify({
-              stored_name: storedName,
-              filename: selectedFile?.name || storedName,
-              size_bytes: selectedFile?.size || 0,
-              duration_seconds: sourceDuration,
-              width: sourceWidth,
-              height: sourceHeight
-            })
-          });
-          saved = attached.project;
+          try {
+            const attached = await api("/api/projects/" + encodeURIComponent(state.active.id) + "/media", {
+              method: "POST",
+              body: JSON.stringify({
+                stored_name: storedName,
+                filename: selectedFile?.name || storedName,
+                size_bytes: selectedFile?.size || 0,
+                duration_seconds: sourceDuration,
+                width: sourceWidth,
+                height: sourceHeight
+              })
+            });
+            saved = attached.project;
+          } catch (mediaError) {
+            mediaWarning = " Project manifest saved, but source media backup failed: " + mediaError.message;
+          }
+        } else {
+          mediaWarning = " Source media is not yet backed up because R2 is not configured.";
         }
       }
       setActive(saved);
       await refresh();
-      status("Saved changes to " + saved.title + (saved.source_media?.length ? " with durable source media." : ". Source media is not yet backed up to R2."));
+      status("Saved changes to " + saved.title + (saved.source_media?.length ? " with durable source media." : ".") + mediaWarning, Boolean(mediaWarning));
     } catch (error) { status("Could not save project: " + error.message, true); }
   });
   byId("deleteProjectBtn").addEventListener("click", async () => {
