@@ -9,9 +9,6 @@
     "lib": [
       "ES2022",
       "WebWorker"
-    ],
-    "types": [
-      "@cloudflare/workers-types"
     ]
   },
   "include": [
