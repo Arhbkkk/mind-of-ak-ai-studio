@@ -126,7 +126,8 @@
     setStatus("Timeline reset to one full-length source clip.");
   });
   playheadButton.addEventListener("click", () => {
-    const clip = selected();\n    if (clip) preview.currentTime = clip.start;
+    const clip = selected();
+    if (clip) preview.currentTime = clip.start;
   });
   window.addEventListener("ak:source-ready", (event) => {
     const duration = Number(event.detail?.duration || 0);
@@ -162,6 +163,7 @@
     render();
     return true;
   };
-  window.getAkTimelineSegments = () => state.clips.map(({start,end}) => ({start,end}));\n  window.isAkTimelineEdited = () => state.edited;
+  window.getAkTimelineSegments = () => state.clips.map(({start,end}) => ({start,end}));
+  window.isAkTimelineEdited = () => state.edited;
   render();
 })();
