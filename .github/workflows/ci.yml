@@ -42,5 +42,6 @@ jobs:
       - name: Check browser JavaScript syntax
         run: |
           node --check web/local-storage.js
+          node --check web/timeline.js
           python -c "from pathlib import Path; import re; html=Path('web/index.html').read_text(); scripts=re.findall(r'<script>(.*?)</script>', html, re.S); assert scripts, 'Expected inline app scripts'; [Path(f'/tmp/mind-of-ak-inline-{i}.js').write_text(script) for i, script in enumerate(scripts)]"
           for script in /tmp/mind-of-ak-inline-*.js; do node --check "$script"; done
