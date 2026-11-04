@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101010">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101010"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Mind of AK"><link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/icon.svg">
 <title>Mind of AK — AI Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -64,6 +64,22 @@
 <div class="field full"><button class="btn secondary" id="saveBriefBtn" type="button">Save brief on this device</button><div class="result" id="briefResult"></div></div></div>
 <div class="notice">Copyright note: music, footage, images, fonts and SFX must be licensed for your intended use. The future auto-editor should prefer original or properly licensed assets and never promise that a track is copyright-safe without checking its licence.</div>
 </aside></section>
+<section class="panel" id="localStoragePanel" style="margin:18px 0">
+<h2>04 / iPad local media library <span class="badge">Local-first</span></h2>
+<p class="sub">Keep original footage and finished exports in this iPad browser's private storage. Import from the Files app, manage saved copies here, and export them back to Files. This browser storage is separate from the iPad's full 1 TB disk and can be cleared by iPadOS; keep important originals in Files or another backup too.</p>
+<div class="field-grid">
+<div class="field full"><label for="localMediaFiles">Import footage, audio, images or finished exports from Files</label><input id="localMediaFiles" type="file" multiple accept="video/*,audio/*,image/*,.srt,.txt,.pdf"></div>
+<div class="field full"><div class="actions"><button class="btn" id="importLocalBtn" type="button">Save selected files locally</button><button class="btn secondary" id="refreshLocalBtn" type="button">Refresh library</button></div></div>
+</div>
+<div class="notice" id="localStorageStatus" role="status" aria-live="polite">Checking local storage support…</div>
+<div class="result" id="localStorageUsage"></div>
+<div id="localMediaList" class="features" aria-live="polite"></div>
+<hr class="section-divider">
+<h2>Cloud backup <span class="badge">Optional · not connected</span></h2>
+<p class="sub">Cloudflare R2 sync will be opt-in. It requires a private R2 bucket, secure user authentication and per-user ownership checks. No files are uploaded to Cloudflare from this panel yet.</p>
+<div class="notice">Local library = this browser profile on this iPad. Files app = your normal iPad file storage. Cloudflare R2 = separate cloud copy after secure sync is implemented. Do not treat browser storage as a guaranteed 1 TB disk replacement.</div>
+<div class="actions"><button class="btn secondary" type="button" disabled>Cloud sync — setup required</button></div>
+</section>
 <footer class="footer"><span>© Mind of AK AI Studio</span><span>Phase 3 · Render queue &amp; subtitle export foundation</span></footer></main>
 <div class="export-modal" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle"><div class="export-dialog"><div class="eyebrow">Final step · Export</div><h2 id="exportModalTitle">Review your export</h2><p class="sub">Check the final format before rendering. Source content is never stretched; fit preserves the full frame, fill crops edges, and blur uses a softened background.</p><div class="export-summary" id="exportSummary"></div><div class="actions"><button class="btn secondary" id="editExportBtn" type="button">Back to settings</button><button class="btn" id="confirmExportBtn" type="button">Render MP4</button></div><div class="ratio-hint">Output dimensions are even-numbered for H.264 compatibility. 4K exports may take longer and use more memory.</div></div></div>
 <script>
@@ -91,4 +107,4 @@ fetch('/api/health').then(r=>r.json()).then(d=>{$('apiStatus').textContent='Back
 $('audioVolume').addEventListener('input',()=>{$('volumeLabel').textContent=Math.round(Number($('audioVolume').value)*100)+'%';});
 $('saveBriefBtn').addEventListener('click',()=>{const brief={projectType:$('projectType').value,editBrief:$('editBrief').value,targetDuration:$('targetDuration').value,language:$('language').value,savedAt:new Date().toISOString()};try{localStorage.setItem('mindOfAkEditBrief',JSON.stringify(brief));$('briefResult').textContent='Brief saved in this browser on this device. It is not uploaded to the server or sent to an AI model.';}catch(e){$('briefResult').textContent='Could not save this brief in local browser storage.';}});
 try{const saved=JSON.parse(localStorage.getItem('mindOfAkEditBrief')||'null');if(saved){$('projectType').value=saved.projectType||$('projectType').value;$('editBrief').value=saved.editBrief||'';$('targetDuration').value=saved.targetDuration||45;$('language').value=saved.language||'Tamil';}}catch(e){}
-</script></body></html>
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));}\n</script><script src="/local-storage.js" defer></script></body></html>
