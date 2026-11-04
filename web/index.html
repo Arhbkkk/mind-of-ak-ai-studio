@@ -112,7 +112,7 @@ async function uploadDirectToR2(file){
   if(!storage.enabled)return null;
   let session=null;
   try{
-    const initResponse=await fetch('/api/storage/multipart/initiate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,content_type:file.type||'application/octet-stream'})});
+    const initResponse=await fetch('/api/storage/multipart/initiate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,content_type:file.type||'application/octet-stream',size_bytes:file.size})});
     session=await readResponse(initResponse);
     if(!initResponse.ok)throw new Error(session.detail||'Could not start R2 upload.');
     const partSize=Number(session.part_size||8*1024*1024);
