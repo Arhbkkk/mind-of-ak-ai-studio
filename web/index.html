@@ -187,6 +187,33 @@ if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.se
     byId("projectSubtitles").value = project?.subtitles || "";
     byId("saveProjectBtn").disabled = !project;
     byId("deleteProjectBtn").disabled = !project;
+    const media = project?.source_media?.[0] || null;
+    if (media) {
+      storedName = media.stored_name;
+      sourceDuration = Number(media.duration_seconds || 0);
+      sourceWidth = Number(media.width || 0);
+      sourceHeight = Number(media.height || 0);
+      selectedFile = null;
+      byId("preview").src = "/api/projects/" + encodeURIComponent(project.id) + "/media/" + encodeURIComponent(storedName);
+      byId("preview").style.display = "block";
+      byId("analyzeBtn").disabled = false;
+      byId("validateBtn").disabled = false;
+      byId("exportBtn").disabled = false;
+      byId("uploadResult").textContent = "Loaded saved project source: " + (media.filename || storedName) + " · " + sourceDuration.toFixed(2) + " seconds.";
+      updateRatioHint();
+      window.dispatchEvent(new CustomEvent("ak:source-ready", { detail: { duration: sourceDuration } }));
+      const clips = project.timeline?.tracks?.[0]?.clips || [];
+      if (window.loadAkTimelineSegments) window.loadAkTimelineSegments(clips);
+    } else {
+      storedName = null;
+      sourceDuration = 0;
+      byId("preview").removeAttribute("src");
+      byId("preview").style.display = "none";
+      byId("analyzeBtn").disabled = true;
+      byId("validateBtn").disabled = true;
+      byId("exportBtn").disabled = true;
+      byId("uploadResult").textContent = "This project has no permanently attached source media yet.";
+    }
   }
   function render(items) {
     const list = byId("projectList");
@@ -245,16 +272,35 @@ if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.se
   byId("saveProjectBtn").addEventListener("click", async () => {
     if (!state.active) return;
     try {
+      const clips = window.getAkTimelineSegments?.() || [];
       const payload = {
         title: byId("projectTitle").value,
         channel: byId("projectChannel").value,
         script: byId("projectScript").value,
-        subtitles: byId("projectSubtitles").value
+        subtitles: byId("projectSubtitles").value,
+        timeline: { tracks: clips.length ? [{ id: "video-main", type: "video", clips }] : [] }
       };
-      const data = await api("/api/projects/" + encodeURIComponent(state.active.id), { method: "PUT", body: JSON.stringify(payload) });
-      setActive(data.project);
+      let saved = (await api("/api/projects/" + encodeURIComponent(state.active.id), { method: "PUT", body: JSON.stringify(payload) })).project;
+      if (storedName && !(saved.source_media || []).some((item) => item.stored_name === storedName)) {
+        const storage = await api("/api/storage/status");
+        if (storage.enabled) {
+          const attached = await api("/api/projects/" + encodeURIComponent(state.active.id) + "/media", {
+            method: "POST",
+            body: JSON.stringify({
+              stored_name: storedName,
+              filename: selectedFile?.name || storedName,
+              size_bytes: selectedFile?.size || 0,
+              duration_seconds: sourceDuration,
+              width: sourceWidth,
+              height: sourceHeight
+            })
+          });
+          saved = attached.project;
+        }
+      }
+      setActive(saved);
       await refresh();
-      status("Saved changes to " + data.project.title + ".");
+      status("Saved changes to " + saved.title + (saved.source_media?.length ? " with durable source media." : ". Source media is not yet backed up to R2."));
     } catch (error) { status("Could not save project: " + error.message, true); }
   });
   byId("deleteProjectBtn").addEventListener("click", async () => {
