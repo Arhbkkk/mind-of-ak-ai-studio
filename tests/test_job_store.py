@@ -30,7 +30,7 @@ class JobStoreTests(unittest.TestCase):
         job_store.claim_next()
         with job_store._connect() as db:
             db.execute("UPDATE render_jobs SET status='completed',updated_at=? WHERE job_id=?",(0,completed))
-            db.execute("UPDATE render_jobs SET updated_at=? WHERE job_id=?",(0,running))
+            db.execute("UPDATE render_jobs SET status='running',updated_at=? WHERE job_id=?",(0,running))
         self.assertEqual(job_store.prune_old_jobs(7),1)
         self.assertIsNone(job_store.get_job(completed))
         self.assertEqual(job_store.get_job(running)["status"],"running")
