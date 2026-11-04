@@ -27,3 +27,17 @@ The app currently has no authentication, authorization, per-user quotas, CSRF pr
 ## Persistence and scaling
 
 The Docker volume stores jobs, uploads and exports on the EC2 disk. EBS is not a backup. Keep one worker on a micro instance. Monitor CPU, memory, disk and billing. The queue is bounded; worker state is durable, but current progress is queued/running/completed rather than exact frame percentage. At scale, migrate to SQS, private S3 and separately scaled workers; these services are not assumed free.
+
+
+## Optional GitHub Actions deployment
+
+The repository includes `.github/workflows/deploy-aws.yml`. It deploys on pushes to `main` or manual workflow dispatch, but only after the EC2 host is provisioned and GitHub repository secrets are configured.
+
+Add these under **Repository → Settings → Secrets and variables → Actions → New repository secret**:
+
+- `AWS_EC2_HOST`: EC2 public DNS name or static public IP.
+- `AWS_EC2_USER`: Ubuntu AMI login user, commonly `ubuntu`.
+- `AWS_EC2_SSH_KEY`: private SSH key for a dedicated deployment key (never commit it).
+- `AWS_EC2_KNOWN_HOSTS`: verified SSH host-key line for the EC2 host. Obtain and verify the fingerprint through a trusted AWS/console channel; do not blindly trust an unverified `ssh-keyscan` result.
+
+Before enabling this workflow, clone the repository on EC2 into `$HOME/mind-of-ak-ai-studio`, configure Docker Compose, and verify that the deployment user can run Docker without an interactive password. Restrict the security group and keep port 8000 private. The workflow deliberately fails closed when any secret is missing. It does not create AWS infrastructure or configure billing.
