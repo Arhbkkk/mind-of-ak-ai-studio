@@ -306,8 +306,12 @@ async def _render_export_now(
     subtitle_file = None
     subtitle_filter = None
     if subtitle_srt.strip():
+        if len(subtitle_srt.encode("utf-8")) > 1_000_000:
+            raise HTTPException(status_code=413, detail="Subtitle file must be smaller than 1 MB.")
         try:
-            parse_srt(subtitle_srt)
+            subtitle_cues = parse_srt(subtitle_srt)
+            if len(subtitle_cues) > 2000:
+                raise ValueError("Subtitle files may contain at most 2,000 cues.")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
         subtitle_check = validate_subtitles(subtitle_srt, clip_duration)
