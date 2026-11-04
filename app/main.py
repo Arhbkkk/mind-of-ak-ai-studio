@@ -22,9 +22,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/mind-of-ak-uploads"))
 EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
-MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "2048")))
+MAX_UPLOAD_MB = max(0, int(os.getenv("MAX_UPLOAD_MB", "0")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "300")))
+MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "600")))
 MAX_RENDER_EDGE = max(640, int(os.getenv("MAX_RENDER_EDGE", "640")))
 TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
@@ -95,6 +95,7 @@ async def health() -> dict:
         "ffmpeg_available": shutil.which("ffmpeg") is not None,
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
+        "upload_limit_enabled": MAX_UPLOAD_MB > 0,
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
         "max_render_edge": MAX_RENDER_EDGE,
         "pipeline_version": "0.5.0",
@@ -120,7 +121,7 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
+                if MAX_UPLOAD_MB > 0 and total > MAX_UPLOAD_BYTES:
                     raise HTTPException(status_code=413, detail=f"File exceeds the {MAX_UPLOAD_MB} MB upload limit.")
                 output.write(chunk)
     except Exception:
@@ -193,7 +194,7 @@ async def validate_media(stored_name: str = Form(...), script: str = Form(""), s
         raise HTTPException(status_code=422, detail="Source must contain a readable video stream and valid duration.")
     checks = [
         {"name": "video_stream", "status": "PASS", "detail": "FFprobe found a readable video stream."},
-        {"name": "duration", "status": "PASS" if 45 <= duration <= 300 else "WARNING", "detail": f"Source duration is {duration:.3f} seconds; target is 45–300 seconds."},
+        {"name": "duration", "status": "PASS" if 45 <= duration <= 600 else "WARNING", "detail": f"Source duration is {duration:.3f} seconds; target is 45–300 seconds."},
         {"name": "audio_stream", "status": "PASS" if audio else "FAIL", "detail": "Audio stream detected." if audio else "No audio stream detected."},
         {"name": "image_narration_semantics", "status": "NOT_VERIFIED", "detail": "Image relevance has not been checked by a vision model or human reviewer."},
         {"name": "rendered_output", "status": "NOT_VERIFIED", "detail": "This endpoint validates source media only, not a rendered output."},
@@ -303,8 +304,8 @@ async def _render_export_now(
     if effective_end > duration + 0.05 or effective_end <= start_seconds:
         raise HTTPException(status_code=422, detail="End time must be after start time and no later than the source duration.")
     effective_end = min(effective_end, duration)
-    if effective_end - start_seconds > 300:
-        raise HTTPException(status_code=413, detail="This starter export supports up to 5 minutes per render. Shorten the clip and retry.")
+    if effective_end - start_seconds > 600:
+        raise HTTPException(status_code=413, detail="This build supports up to 10 minutes per render. Shorten the clip and retry.")
 
     clip_duration = effective_end - start_seconds
     subtitle_file = None
