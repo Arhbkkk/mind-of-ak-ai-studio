@@ -22,6 +22,7 @@ def test_project_create_update_list_and_delete(tmp_path):
     assert loaded["title"] == "Science short"
     assert loaded["channel"] == "mind-of-ak"
     assert loaded["timeline"] == {"tracks": []}
+    assert loaded["source_media"] == []
     loaded["script"] = "A sample script"
     repo.save(loaded)
     assert repo.list()[0]["script"] == "A sample script"
