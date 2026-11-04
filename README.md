@@ -71,3 +71,23 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 ## Validation guarantees and limits
 
 Validation is deliberately conservative: `NOT_VERIFIED` is not a pass. SRT checks cover parseability, timestamp ordering, cue duration, overlap warnings, and whether cues exceed the source duration. Optional script comparison only compares the script against a transcript supplied by another process; it does not transcribe the audio or guarantee pronunciation/semantic correctness. This build does not yet provide automatic speech recognition, image-to-narration semantic matching, a frame-accurate visual timeline, or post-render audio/subtitle/image auditing. Those checks must remain unverified until implemented and tested. Absolute perfect validation cannot be guaranteed by automated checks alone; uncertain cases require human review.
+
+
+## Cloud project storage foundation (in development)
+
+The project branch adds a provider-neutral object storage interface, an atomic local development adapter, an S3-compatible adapter, and versioned owner-scoped project manifests. The manifest schema reserves fields for each creator profile: settings, script, subtitles, timeline tracks, asset references and resumable story parts.
+
+Local storage defaults to `/tmp/mind-of-ak-projects` and is **ephemeral** on hosted instances. It is not a cloud gallery and must not be treated as durable.
+
+To enable durable object storage, provision a private S3-compatible bucket and configure server-side environment variables:
+
+- `S3_BUCKET` — bucket name.
+- `S3_ENDPOINT_URL` — provider endpoint; optional for AWS S3.
+- `S3_REGION` — provider region.
+- `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` — configure both together, or omit both only when the runtime has an appropriate IAM role.
+
+The adapter supports AWS S3-compatible APIs such as Cloudflare R2. Keep the bucket private, block public access, use least-privilege credentials and configure provider backups/lifecycle rules. Never put credentials in source control or chat.
+
+**Not yet connected:** authenticated project API routes, browser gallery, resumable direct-to-cloud uploads, signed download links, durable export storage, database-backed job queue, and object lifecycle management. Do not assume cloud persistence is active until a bucket is provisioned and configured. The live default-branch app remains without owner authentication; do not upload confidential media.
+
+Render Free compute, storage and bandwidth are limited; unlimited free video rendering or AI generation cannot be promised.
