@@ -190,7 +190,7 @@ class ProjectRepository:
             "owner_id": self.owner_id, "title": title, "channel": channel,
             "created_at": now, "updated_at": now, "status": "draft",
             "settings": settings or {}, "assets": [], "source_media": [], "timeline": {"tracks": []},
-            "script": "", "subtitles": "", "story_parts": [],
+            "script": "", "subtitles": "", "story_parts": [], "render_history": [],
         }
         self.save(project)
         return project
@@ -203,7 +203,7 @@ class ProjectRepository:
             raise ValueError("Unsupported project schema version.")
         if project.get("channel") not in PROJECT_CHANNELS:
             raise ValueError("Unknown creator channel.")
-        if not isinstance(project.get("assets"), list) or not isinstance(project.get("source_media", []), list) or not isinstance(project.get("timeline"), dict):
+        if not isinstance(project.get("assets"), list) or not isinstance(project.get("source_media", []), list) or not isinstance(project.get("render_history", []), list) or not isinstance(project.get("timeline"), dict):
             raise ValueError("Project assets and timeline have invalid shapes.")
         encoded = json.dumps(project, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) > 2 * 1024 * 1024:
