@@ -201,7 +201,7 @@ async def get_project_media(project_id: str, stored_name: str):
 async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
     try:
         project = project_repository.get(project_id)
-        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings", "render_history"}
+        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings", "}
         for key in allowed:
             if key in payload:
                 project[key] = payload[key]
@@ -847,6 +847,23 @@ async def _render_timeline_now(
             final_path.unlink(missing_ok=True)
 
 
+def record_project_export(project_id: str, result: dict) -> bool:
+    if not project_id:
+        return False
+    project = project_repository.get(project_id)
+    history = project.setdefault("render_history", [])
+    history.append({
+        "filename": result.get("filename"),
+        "duration_seconds": result.get("duration_seconds"),
+        "size_bytes": result.get("size_bytes"),
+        "durable_storage": bool(result.get("durable_storage")),
+        "created_at": time.time(),
+    })
+    project["render_history"] = history[-50:]
+    project_repository.save(project)
+    return True
+
+
 # Render jobs persist in SQLite; a separate worker executes FFmpeg.
 @app.post("/api/export")
 async def start_export(
@@ -865,7 +882,13 @@ async def start_export(
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
     timeline_json: str = Form(""),
+    project_id: str = Form(""),
 ) -> dict:
+    if project_id:
+        try:
+            project_repository.get(project_id)
+        except (ValueError, StorageError) as exc:
+            raise HTTPException(status_code=404, detail="Project not found for this export.") from exc
     if not 20 <= subtitle_size <= 64:
         raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
     if len(subtitle_srt.encode("utf-8")) > 1_000_000:
@@ -904,6 +927,7 @@ async def start_export(
         "subtitle_size": subtitle_size,
         "subtitle_position": subtitle_position,
         "subtitle_color": subtitle_color,
+        "project_id": project_id,
     }
     if timeline_segments is not None:
         payload["timeline_segments"] = timeline_segments
