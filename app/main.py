@@ -11,13 +11,14 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
 from app.subtitles import build_subtitle_filter
 from app import job_store
 from app.auth import install_owner_gate
+from app.storage import ProjectRepository, StorageError, build_object_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -54,6 +55,7 @@ cleanup_old_files()
 
 app = FastAPI(title="Mind of AK AI Studio", version="0.5.0")
 install_owner_gate(app)
+project_repository = ProjectRepository(build_object_store())
 job_store.init_db()
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -102,7 +104,75 @@ async def health() -> dict:
         "max_render_edge": MAX_RENDER_EDGE,
         "pipeline_version": "0.5.0",
         "validation_endpoint": "/api/validate",
+        "project_storage": "r2" if os.getenv("R2_BUCKET") else ("s3" if os.getenv("S3_BUCKET") else "local_ephemeral"),
     }
+
+
+@app.get("/api/projects")
+async def list_projects() -> dict:
+    projects = project_repository.list()
+    return {"projects": [
+        {key: project.get(key) for key in ("id", "title", "channel", "status", "created_at", "updated_at")}
+        for project in projects
+    ]}
+
+
+@app.post("/api/projects")
+async def create_project(payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.create(
+            payload.get("title", ""),
+            payload.get("channel", ""),
+            payload.get("settings"),
+        )
+    except (ValueError, StorageError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True, "project": project}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str) -> dict:
+    try:
+        return {"project": project_repository.get(project_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.put("/api/projects/{project_id}")
+async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.get(project_id)
+        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings", "render_history"}
+        for key in allowed:
+            if key in payload:
+                project[key] = payload[key]
+        if not isinstance(project.get("title"), str) or not project["title"].strip() or len(project["title"]) > 120:
+            raise ValueError("Project title must contain 1 to 120 characters.")
+        if project.get("status") not in {"draft", "ready", "rendering", "completed", "failed"}:
+            raise ValueError("Invalid project status.")
+        if not isinstance(project.get("settings"), dict) or not isinstance(project.get("assets"), list):
+            raise ValueError("Project settings and assets must be objects/lists.")
+        if not isinstance(project.get("timeline"), dict) or not isinstance(project.get("story_parts"), list):
+            raise ValueError("Project timeline and story parts have invalid shapes.")
+        if not isinstance(project.get("script", ""), str) or not isinstance(project.get("subtitles", ""), str):
+            raise ValueError("Project script and subtitles must be text.")
+        project_repository.save(project)
+        return {"ok": True, "project": project}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str) -> dict:
+    try:
+        project_repository.delete(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "deleted": project_id}
 
 
 @app.post("/api/upload")
