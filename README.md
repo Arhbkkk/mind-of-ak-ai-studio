@@ -26,13 +26,13 @@ The owner-only project workspace is now wired into the website UI and backend:
 
 Before deploying this branch, set the same `OWNER_PASSWORD` as a Cloudflare Worker secret and in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub or a Wrangler vars file. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
 
-The gallery currently persists project manifests, script/notes, subtitles and timeline JSON only. It does not yet upload project media or create generated assets. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
+The gallery persists project manifests, script/notes, subtitles and timeline JSON. Source videos can upload directly to R2 and completed MP4 exports are stored in the saved/ prefix when R2 is configured. Linking uploaded media into project manifests and reopening all project media from the gallery is still in progress. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
 
 ## Current features
 
 - Responsive dark-glass and gold interface.
 - Upload video files in MP4, MOV, M4V, WEBM, or MKV format.
-- Server-side file size limit via `MAX_UPLOAD_MB` (default 2048 MB / 2 GB; deployment memory, request limits, disk and proxy settings can impose lower limits).
+- Direct multipart source uploads to Cloudflare R2 in 8 MiB chunks when configured, with a separate `MAX_DIRECT_UPLOAD_MB` cap (default 2048 MB); backend-proxy fallback remains available when R2 is not configured.
 - Validate that an upload contains a readable video stream using FFprobe.
 - Read duration, resolution, codec, frame rate, and audio-stream presence.
 - Find visual scene-change candidates using FFmpeg's scene-change filter. This is visual-change detection, not semantic AI scene understanding.
@@ -53,7 +53,8 @@ The gallery currently persists project manifests, script/notes, subtitles and ti
 - Tamil/English TTS, original music, sleep ambience, and kids' story narration.
 - AI asset search and licensing verification, generated diagrams, puzzle drawings, or B-roll insertion.
 - Natural denoise, stabilization, color grading, super-resolution/upscaling, or any guarantee of increased source detail.
-- Voice Studio, Style DNA, project accounts, cloud project persistence, or collaborative editing.
+- Multi-source, multi-track timeline editing, transitions, keyframes and audio ducking. The current timeline renderer only supports one source and hard cuts.
+- Full project-media library linking, generated asset management, collaborative editing and multi-user accounts.
 
 The roadmap takes inspiration from professional editing workflows (timeline control, precise trimming, audio mixing, color management, captions, proxy workflows, and export presets) without copying proprietary source code, brand assets, or protected UI designs from other products.
 
