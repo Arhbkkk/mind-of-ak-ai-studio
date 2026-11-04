@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const byId = (id) => document.getElementById(id);
-  const state = { duration: 0, clips: [], selectedId: null, nextId: 1 };
+  const state = { duration: 0, clips: [], selectedId: null, nextId: 1, edited: false };
   const preview = byId("preview");
   const lane = byId("timelineLane");
   const list = byId("timelineClipList");
@@ -86,19 +86,19 @@
         if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end > state.duration || end - start < 0.1) {
           setStatus("Timeline trim rejected: enter a valid range within the source, at least 0.1 seconds long."); return;
         }
-        clip.start = Number(start.toFixed(2)); clip.end = Number(end.toFixed(2)); render();
+        clip.start = Number(start.toFixed(2)); clip.end = Number(end.toFixed(2)); state.edited = true; render();
       });
       const up = document.createElement("button");
       up.type = "button"; up.className = "btn secondary"; up.textContent = "↑"; up.disabled = index === 0;
       up.setAttribute("aria-label", "Move clip up");
-      up.addEventListener("click", () => { [state.clips[index - 1], state.clips[index]] = [state.clips[index], state.clips[index - 1]]; render(); });
+      up.addEventListener("click", () => { [state.clips[index - 1], state.clips[index]] = [state.clips[index], state.clips[index - 1]]; state.edited = true; render(); });
       const down = document.createElement("button");
       down.type = "button"; down.className = "btn secondary"; down.textContent = "↓"; down.disabled = index === state.clips.length - 1;
       down.setAttribute("aria-label", "Move clip down");
-      down.addEventListener("click", () => { [state.clips[index + 1], state.clips[index]] = [state.clips[index], state.clips[index + 1]]; render(); });
+      down.addEventListener("click", () => { [state.clips[index + 1], state.clips[index]] = [state.clips[index], state.clips[index + 1]]; state.edited = true; render(); });
       const remove = document.createElement("button");
       remove.type = "button"; remove.className = "btn secondary"; remove.textContent = "×"; remove.setAttribute("aria-label", "Delete clip");
-      remove.addEventListener("click", () => { state.clips.splice(index, 1); state.selectedId = state.clips[Math.min(index, state.clips.length - 1)]?.id || null; render(); });
+      remove.addEventListener("click", () => { state.clips.splice(index, 1); state.edited = true; state.selectedId = state.clips[Math.min(index, state.clips.length - 1)]?.id || null; render(); });
       actions.append(trimIn, trimOut, apply, up, down, remove);
       row.append(details, actions);
       list.append(row);
@@ -113,7 +113,7 @@
     const index = state.clips.findIndex((item) => item.id === clip.id);
     const right = makeClip(point, clip.end);
     clip.end = Number(point.toFixed(2));
-    state.clips.splice(index + 1, 0, right);
+    state.clips.splice(index + 1, 0, right); state.edited = true;
     state.selectedId = right.id;
     render();
     setStatus("Timeline split created at " + point.toFixed(2) + " seconds. This is currently a local edit plan.");
@@ -142,6 +142,6 @@
       // Keep the playhead native to the video element; timeline selection remains explicit.
     }
   });
-  window.getAkTimelineSegments = () => state.clips.map(({start,end}) => ({start,end}));
+  window.getAkTimelineSegments = () => state.clips.map(({start,end}) => ({start,end}));\n  window.isAkTimelineEdited = () => state.edited;
   render();
 })();
