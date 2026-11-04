@@ -61,7 +61,7 @@
 <div class="field full"><button class="btn secondary" id="saveBriefBtn" type="button">Save brief on this device</button><div class="result" id="briefResult"></div></div></div>
 <div class="notice">Copyright note: music, footage, images, fonts and SFX must be licensed for your intended use. The future auto-editor should prefer original or properly licensed assets and never promise that a track is copyright-safe without checking its licence.</div>
 </aside></section>
-<footer class="footer"><span>© Mind of AK AI Studio</span><span>Phase 2 · Video analysis &amp; basic export</span></footer></main>
+<footer class="footer"><span>© Mind of AK AI Studio</span><span>Phase 3 · Render queue &amp; subtitle export foundation</span></footer></main>
 <div class="export-modal" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle"><div class="export-dialog"><div class="eyebrow">Final step · Export</div><h2 id="exportModalTitle">Review your export</h2><p class="sub">Check the final format before rendering. Source content is never stretched; fit preserves the full frame, fill crops edges, and blur uses a softened background.</p><div class="export-summary" id="exportSummary"></div><div class="actions"><button class="btn secondary" id="editExportBtn" type="button">Back to settings</button><button class="btn" id="confirmExportBtn" type="button">Render MP4</button></div><div class="ratio-hint">Output dimensions are even-numbered for H.264 compatibility. 4K exports may take longer and use more memory.</div></div></div>
 <script>
 const $=id=>document.getElementById(id);let selectedFile=null,storedName=null,sourceDuration=0,previewUrl=null,sourceWidth=0,sourceHeight=0;
