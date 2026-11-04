@@ -21,3 +21,5 @@ services:
         value: owner
       - key: OWNER_PASSWORD
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://studio.ammaappallub.workers.dev,https://mind-of-ak-ai-studio.onrender.com
