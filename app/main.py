@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt, validate_timeline_segments
@@ -19,6 +19,7 @@ from app.subtitles import build_subtitle_filter
 from app import job_store
 from app.auth import install_owner_gate
 from app.storage import ProjectRepository, StorageError, build_object_store
+from app import r2_storage
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -65,6 +66,11 @@ def safe_upload(name: str) -> Path:
     if Path(name).name != name or not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", name):
         raise HTTPException(status_code=400, detail="Invalid uploaded file reference.")
     path = UPLOAD_DIR / name
+    if not path.is_file() and r2_storage.configured():
+        try:
+            r2_storage.ensure_local(name, path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Uploaded source was not found in temporary R2 storage.") from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Uploaded source was not found. It may have expired after a host restart.")
     return path
@@ -173,6 +179,112 @@ async def delete_project(project_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "deleted": project_id}
+
+
+@app.get("/api/storage/status")
+async def storage_status() -> dict:
+    enabled = r2_storage.configured()
+    return {
+        "enabled": enabled,
+        "provider": "Cloudflare R2" if enabled else None,
+        "upload_mode": "direct-multipart" if enabled else "backend-proxy",
+    }
+
+
+@app.post("/api/storage/multipart/initiate")
+async def storage_multipart_initiate(request: Request) -> dict:
+    if not r2_storage.configured():
+        raise HTTPException(status_code=503, detail="R2 storage is not configured.")
+    try:
+        data = await request.json()
+        result = r2_storage.begin_upload(
+            str(data.get("filename", "")),
+            str(data.get("content_type", "application/octet-stream")),
+        )
+        return {"ok": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not start direct storage upload.") from exc
+
+
+@app.post("/api/storage/multipart/sign-part")
+async def storage_multipart_sign_part(request: Request) -> dict:
+    try:
+        data = await request.json()
+        url = r2_storage.sign_part(
+            str(data.get("object_key", "")),
+            str(data.get("upload_id", "")),
+            int(data.get("part_number", 0)),
+        )
+        return {"ok": True, "url": url}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not sign upload part.") from exc
+
+
+@app.post("/api/storage/multipart/complete")
+async def storage_multipart_complete(request: Request) -> dict:
+    try:
+        data = await request.json()
+        name = str(data.get("stored_as", ""))
+        if not re.fullmatch(r"[a-f0-9]{32}\\.(mp4|mov|m4v|webm|mkv)", name):
+            raise ValueError("Invalid uploaded file reference.")
+        key = str(data.get("object_key", ""))
+        if key != f"temporary/{name}":
+            raise ValueError("Upload object key does not match the generated file reference.")
+        destination = UPLOAD_DIR / name
+        total = r2_storage.complete_upload(
+            key, str(data.get("upload_id", "")), data.get("parts", []), destination
+        )
+        probe = await run_command([
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,r_frame_rate,duration",
+            "-show_entries", "format=duration,format_name", "-of", "json", str(destination)
+        ], timeout=45)
+        if probe.returncode != 0:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=415, detail="The uploaded file could not be read as a valid video.")
+        metadata = json.loads(probe.stdout)
+        streams = metadata.get("streams", [])
+        if not streams:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=415, detail="No video stream was found in this file.")
+        stream = streams[0]
+        duration = float(stream.get("duration") or metadata.get("format", {}).get("duration") or 0)
+        if duration <= 0 or duration > MAX_SOURCE_DURATION_SECONDS:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Video duration must be between 1 and {MAX_SOURCE_DURATION_SECONDS} seconds.",
+            )
+        return {
+            "ok": True,
+            "message": "Video uploaded to R2 and validated.",
+            "stored_as": name,
+            "size_bytes": total,
+            "duration_seconds": round(duration, 3),
+            "width": stream.get("width"),
+            "height": stream.get("height"),
+            "video_codec": stream.get("codec_name"),
+            "frame_rate": stream.get("r_frame_rate"),
+            "storage": "Cloudflare R2",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not complete or validate the R2 upload. Retry the upload.") from exc
+
+
+@app.post("/api/storage/multipart/abort")
+async def storage_multipart_abort(request: Request) -> dict:
+    try:
+        data = await request.json()
+        r2_storage.abort_upload(str(data.get("object_key", "")), str(data.get("upload_id", "")))
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not abort the incomplete upload.") from exc
 
 
 @app.post("/api/upload")
