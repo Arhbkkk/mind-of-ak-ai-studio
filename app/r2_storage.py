@@ -10,6 +10,8 @@ import boto3
 from botocore.config import Config
 
 UPLOAD_PART_SIZE = 8 * 1024 * 1024
+MAX_DIRECT_UPLOAD_MB = max(1, int(os.getenv('MAX_DIRECT_UPLOAD_MB', '2048')))
+MAX_DIRECT_UPLOAD_BYTES = MAX_DIRECT_UPLOAD_MB * 1024 * 1024
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 
 
@@ -32,8 +34,10 @@ def client():
     )
 
 
-def begin_upload(filename: str, content_type: str) -> dict[str, Any]:
+def begin_upload(filename: str, content_type: str, size_bytes: int) -> dict[str, Any]:
     suffix = Path(filename or "video.mp4").suffix.lower()
+    if size_bytes <= 0 or size_bytes > MAX_DIRECT_UPLOAD_BYTES:
+        raise ValueError(f"Direct uploads must be between 1 byte and {MAX_DIRECT_UPLOAD_MB} MB.")
     if suffix not in ALLOWED_SUFFIXES:
         raise ValueError("Unsupported video format.")
     safe_name = f"{uuid.uuid4().hex}{suffix}"
@@ -71,10 +75,16 @@ def complete_upload(key: str, upload_id: str, parts: list[dict], destination: Pa
             raise ValueError("Invalid multipart upload part metadata.")
         normalized.append({"PartNumber": number, "ETag": etag})
     normalized.sort(key=lambda item: item["PartNumber"])
-    client().complete_multipart_upload(
+    storage = client()
+    storage.complete_multipart_upload(
         Bucket=os.environ["R2_BUCKET"], Key=key, UploadId=upload_id,
         MultipartUpload={"Parts": normalized},
     )
+    head = storage.head_object(Bucket=os.environ["R2_BUCKET"], Key=key)
+    size_bytes = int(head.get("ContentLength", 0))
+    if size_bytes <= 0 or size_bytes > MAX_DIRECT_UPLOAD_BYTES:
+        storage.delete_object(Bucket=os.environ["R2_BUCKET"], Key=key)
+        raise ValueError(f"Completed upload exceeds the {MAX_DIRECT_UPLOAD_MB} MB limit.")
     return download_object(key, destination)
 
 
