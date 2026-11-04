@@ -146,6 +146,57 @@ async def get_project(project_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post("/api/projects/{project_id}/media")
+async def attach_project_media(project_id: str, payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.get(project_id)
+        if not r2_storage.configured():
+            raise HTTPException(status_code=503, detail="Durable project media requires Cloudflare R2 configuration.")
+        stored_name = str(payload.get("stored_name", ""))
+        if not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", stored_name):
+            raise ValueError("Invalid source media reference.")
+        object_key = r2_storage.promote_source(stored_name, project_id)
+        entry = {
+            "stored_name": stored_name,
+            "object_key": object_key,
+            "filename": str(payload.get("filename", "source-video"))[:180],
+            "size_bytes": max(0, int(payload.get("size_bytes", 0))),
+            "duration_seconds": max(0.0, float(payload.get("duration_seconds", 0))),
+            "width": max(0, int(payload.get("width", 0))),
+            "height": max(0, int(payload.get("height", 0))),
+        }
+        media = project.setdefault("source_media", [])
+        media[:] = [item for item in media if item.get("stored_name") != stored_name]
+        media.append(entry)
+        project_repository.save(project)
+        return {"ok": True, "project": project, "media": entry}
+    except HTTPException:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not attach source media to this project.") from exc
+
+
+@app.get("/api/projects/{project_id}/media/{stored_name}")
+async def get_project_media(project_id: str, stored_name: str):
+    try:
+        project = project_repository.get(project_id)
+        if not any(item.get("stored_name") == stored_name for item in project.get("source_media", [])):
+            raise HTTPException(status_code=404, detail="This media file is not attached to the selected project.")
+        if r2_storage.configured():
+            url = r2_storage.presign_project_source(stored_name, expires_in=900)
+            return RedirectResponse(url, status_code=307)
+        path = safe_upload(stored_name)
+        return FileResponse(path, media_type="video/mp4")
+    except HTTPException:
+        raise
+    except (ValueError, StorageError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Project source media was not found.") from exc
+
+
 @app.put("/api/projects/{project_id}")
 async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
     try:
@@ -175,9 +226,17 @@ async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
 @app.delete("/api/projects/{project_id}")
 async def delete_project(project_id: str) -> dict:
     try:
+        project = project_repository.get(project_id)
+        if r2_storage.configured():
+            for item in project.get("source_media", []):
+                r2_storage.delete_project_source(project_id, str(item.get("stored_name", "")))
         project_repository.delete(project_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not delete all project data safely.") from exc
     return {"ok": True, "deleted": project_id}
 
 
