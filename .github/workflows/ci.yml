@@ -28,3 +28,14 @@ jobs:
         run: docker build -t mind-of-ak-ai-studio:ci .
       - name: Smoke-test FFmpeg Tamil subtitle rendering
         run: docker run --rm -v "$PWD/tests:/tests:ro" mind-of-ak-ai-studio:ci python -m unittest discover -s /tests -p test_ffmpeg_subtitle_integration.py -v
+  cloudflare-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Cloudflare dependencies
+        run: npm install
+      - name: Generate Cloudflare bindings and type-check
+        run: npx wrangler types && npx tsc --noEmit
