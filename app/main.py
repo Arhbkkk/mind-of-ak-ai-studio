@@ -187,7 +187,7 @@ async def get_project_media(project_id: str, stored_name: str):
         if not any(item.get("stored_name") == stored_name for item in project.get("source_media", [])):
             raise HTTPException(status_code=404, detail="This media file is not attached to the selected project.")
         if r2_storage.configured():
-            url = r2_storage.presign_project_source(stored_name, expires_in=900)
+            url = r2_storage.presign_project_source(project_id, stored_name, expires_in=900)
             return RedirectResponse(url, status_code=307)
         path = safe_upload(stored_name)
         return FileResponse(path, media_type="video/mp4")
