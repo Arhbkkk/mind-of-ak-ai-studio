@@ -142,6 +142,26 @@
       // Keep the playhead native to the video element; timeline selection remains explicit.
     }
   });
+  window.loadAkTimelineSegments = (segments) => {
+    if (!Array.isArray(segments) || !state.duration) return false;
+    const valid = segments.filter((item) => Number.isFinite(Number(item.start))
+      && Number.isFinite(Number(item.end))
+      && Number(item.start) >= 0
+      && Number(item.end) <= state.duration
+      && Number(item.end) - Number(item.start) >= 0.1);
+    if (valid.length > 12) return false;
+    state.clips = valid.map((item, index) => ({
+      id: state.nextId++,
+      start: Number(Number(item.start).toFixed(2)),
+      end: Number(Number(item.end).toFixed(2)),
+      name: "Clip " + (index + 1)
+    }));
+    state.selectedId = state.clips[0]?.id || null;
+    state.edited = !(state.clips.length === 1 && state.clips[0].start <= 0.01
+      && Math.abs(state.clips[0].end - state.duration) <= 0.05);
+    render();
+    return true;
+  };
   window.getAkTimelineSegments = () => state.clips.map(({start,end}) => ({start,end}));\n  window.isAkTimelineEdited = () => state.edited;
   render();
 })();
