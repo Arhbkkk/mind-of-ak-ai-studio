@@ -26,7 +26,7 @@ The owner-only project workspace is now wired into the website UI and backend:
 
 Before deploying this branch, set the same `OWNER_PASSWORD` as a Cloudflare Worker secret and in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub or a Wrangler vars file. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
 
-The gallery persists project manifests, script/notes, subtitles and timeline JSON. Source videos can upload directly to R2 and completed MP4 exports are stored in the saved/ prefix when R2 is configured. Linking uploaded media into project manifests and reopening all project media from the gallery is still in progress. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
+The gallery persists project manifests, script/notes, subtitles and timeline JSON. Source videos can upload directly to R2 and completed MP4 exports are stored in the saved/ prefix when R2 is configured. The gallery can attach and reopen one source video per project, preserve its timeline, and show saved render history. Multiple source files and generated assets remain in progress. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
 
 ## Current features
 
