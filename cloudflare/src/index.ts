@@ -22,7 +22,9 @@ function authorized(request: Request, env: Env): boolean {
   const header = request.headers.get("Authorization") || "";
   if (!header.startsWith("Basic ")) return false;
   try {
-    const decoded = atob(header.slice(6).trim());
+    const binary = atob(header.slice(6).trim());
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const decoded = new TextDecoder().decode(bytes);
     const separator = decoded.indexOf(":");
     if (separator < 0) return false;
     const username = decoded.slice(0, separator);
