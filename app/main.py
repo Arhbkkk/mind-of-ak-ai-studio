@@ -307,21 +307,23 @@ async def _render_export_now(
     subtitle_filter = None
     if subtitle_srt.strip():
         try:
-            cues = parse_srt(subtitle_srt)
+            parse_srt(subtitle_srt)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
         subtitle_check = validate_subtitles(subtitle_srt, clip_duration)
         if subtitle_check["status"] == "FAIL":
             raise HTTPException(status_code=422, detail="Subtitle timestamps must fit inside the selected export clip. Use clip-relative timestamps starting at 00:00:00,000.")
-        subtitle_file = EXPORT_DIR / f"ak_subtitles_{uuid.uuid4().hex}.srt"
-        subtitle_file.write_text(subtitle_srt, encoding="utf-8")
-        subtitle_filter = f"subtitles=filename={subtitle_file.as_posix()}"
     if not 0 <= fade_seconds <= 3:
         raise HTTPException(status_code=422, detail="Fade duration must be between 0 and 3 seconds.")
     if fade_seconds * 2 > clip_duration:
         raise HTTPException(status_code=422, detail="Fade-in and fade-out together cannot exceed the clip duration.")
     if not 0 <= audio_volume <= 2:
         raise HTTPException(status_code=422, detail="Audio volume must be between 0 and 2.")
+
+    if subtitle_srt.strip():
+        subtitle_file = EXPORT_DIR / f"ak_subtitles_{uuid.uuid4().hex}.srt"
+        subtitle_file.write_text(subtitle_srt, encoding="utf-8")
+        subtitle_filter = f"subtitles=filename={subtitle_file.as_posix()}"
 
     output_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     output = EXPORT_DIR / output_name
