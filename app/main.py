@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
 from app.subtitles import build_subtitle_filter
 from app import job_store
+from app.auth import install_owner_gate
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -52,6 +53,7 @@ def cleanup_old_files() -> None:
 cleanup_old_files()
 
 app = FastAPI(title="Mind of AK AI Studio", version="0.5.0")
+install_owner_gate(app)
 job_store.init_db()
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
