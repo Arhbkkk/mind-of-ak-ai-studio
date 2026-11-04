@@ -97,7 +97,7 @@ class S3ObjectStore:
         secret = secret_key or os.getenv("R2_SECRET_ACCESS_KEY") or os.getenv("S3_SECRET_ACCESS_KEY")
         if bool(access) != bool(secret):
             raise StorageError("Both object-storage access key and secret key are required.")
-        kwargs: dict[str, Any] = {"region_name": region or "auto", "config": Config(signature_version="s3v4")}
+        kwargs: dict[str, Any] = {"region_name": region or "us-east-1", "config": Config(signature_version="s3v4")}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
         if access and secret:
@@ -134,7 +134,7 @@ class S3ObjectStore:
             raise StorageError("Object storage lookup failed.") from exc
 
     def list(self, prefix: str) -> list[str]:
-        safe_prefix = _validate_key(prefix.rstrip("/") + "/")
+        safe_prefix = _validate_key(prefix.rstrip("/")) + "/"
         try:
             paginator = self.client.get_paginator("list_objects_v2")
             return sorted(item["Key"] for page in paginator.paginate(Bucket=self.bucket, Prefix=safe_prefix)
