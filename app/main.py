@@ -94,7 +94,7 @@ async def health() -> dict:
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
-        "pipeline_version": "0.4.0",
+        "pipeline_version": "0.5.0",
         "validation_endpoint": "/api/validate",
     }
 
