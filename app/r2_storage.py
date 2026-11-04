@@ -10,7 +10,7 @@ import boto3
 from botocore.config import Config
 
 UPLOAD_PART_SIZE = 8 * 1024 * 1024
-MAX_DIRECT_UPLOAD_MB = max(1, int(os.getenv('MAX_DIRECT_UPLOAD_MB', '2048')))
+MAX_DIRECT_UPLOAD_MB = max(1, int(os.getenv('MAX_DIRECT_UPLOAD_MB', '512')))
 MAX_DIRECT_UPLOAD_BYTES = MAX_DIRECT_UPLOAD_MB * 1024 * 1024
 ALLOWED_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 
