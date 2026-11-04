@@ -57,7 +57,14 @@ def install_owner_gate(app: FastAPI) -> None:
             origin = request.headers.get("origin")
             host = request.headers.get("host", "").lower()
             parsed = urlsplit(origin or "")
-            if not origin or parsed.netloc.lower() != host or parsed.scheme not in {"http", "https"}:
+            same_backend_origin = bool(origin) and parsed.netloc.lower() == host and parsed.scheme in {"http", "https"}
+            configured_origins = {
+                value.strip().rstrip("/")
+                for value in os.getenv("ALLOWED_ORIGINS", "").split(",")
+                if value.strip()
+            }
+            allowed_frontend_origin = bool(origin) and origin.rstrip("/") in configured_origins
+            if not (same_backend_origin or allowed_frontend_origin):
                 return JSONResponse(status_code=403, content={"detail": "Cross-origin state changes are not allowed."})
 
         return await call_next(request)
