@@ -101,3 +101,26 @@ def ensure_local(stored_name: str, destination: Path) -> Path:
 def _validate_key(key: str) -> None:
     if not re.fullmatch(r"temporary/[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", key):
         raise ValueError("Invalid temporary object key.")
+
+
+def save_export(filename: str, source: Path) -> str:
+    """Persist a completed MP4 under a non-expiring saved/ key."""
+    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\\.mp4", filename):
+        raise ValueError("Invalid export filename.")
+    key = f"saved/{filename}"
+    client().upload_file(
+        str(source), os.environ["R2_BUCKET"], key,
+        ExtraArgs={"ContentType": "video/mp4", "Metadata": {"lifecycle": "saved"}},
+    )
+    return key
+
+
+def presign_saved_export(filename: str, expires_in: int = 900) -> str:
+    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\\.mp4", filename):
+        raise ValueError("Invalid export filename.")
+    return client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": os.environ["R2_BUCKET"], "Key": f"saved/{filename}"},
+        ExpiresIn=max(60, min(int(expires_in), 3600)),
+        HttpMethod="GET",
+    )
