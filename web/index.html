@@ -351,7 +351,8 @@ if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.se
   window.refreshActiveAkProject = async () => {
     if (!state.active) return;
     const data = await api("/api/projects/" + encodeURIComponent(state.active.id));
-    setActive(data.project);
+    state.active = data.project;
+    renderExports(data.project.render_history || []);
   };
   refresh();
 })();
