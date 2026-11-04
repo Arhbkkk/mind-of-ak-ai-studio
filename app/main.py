@@ -513,10 +513,19 @@ async def _render_export_now(
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+    durable_export = False
+    if r2_storage.configured():
+        try:
+            r2_storage.save_export(output_name, output)
+            durable_export = True
+        except Exception as exc:
+            output.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail="Render completed but the durable R2 save failed. Check R2 permissions and retry; the export was not marked as saved.") from exc
     cleanup_old_files()
     return {
         "ok": True,
         "filename": output_name,
+        "durable_storage": durable_export,
         "download_url": f"/api/download/{output_name}",
         "size_bytes": output.stat().st_size,
         "duration_seconds": round(effective_end - start_seconds, 2),
@@ -606,6 +615,13 @@ async def export_status(job_id: str) -> dict:
 async def download_export(filename: str) -> FileResponse:
     if Path(filename).name != filename or not re.fullmatch(r"ak_export_[a-f0-9]{32}\.mp4", filename):
         raise HTTPException(status_code=400, detail="Invalid export reference.")
+    if r2_storage.configured():
+        try:
+            from fastapi.responses import RedirectResponse
+            url = r2_storage.presign_saved_export(filename, expires_in=900)
+            return RedirectResponse(url, status_code=307)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Saved export was not found in R2.") from exc
     path = EXPORT_DIR / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export not found. It may have expired after a host restart.")
