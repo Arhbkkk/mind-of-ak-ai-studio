@@ -229,7 +229,7 @@ async def storage_multipart_complete(request: Request) -> dict:
     try:
         data = await request.json()
         name = str(data.get("stored_as", ""))
-        if not re.fullmatch(r"[a-f0-9]{32}\\.(mp4|mov|m4v|webm|mkv)", name):
+        if not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", name):
             raise ValueError("Invalid uploaded file reference.")
         key = str(data.get("object_key", ""))
         if key != f"temporary/{name}":
