@@ -2,6 +2,19 @@
 
 Mind of AK AI Studio is a browser-based creator workspace being developed in stages. This repository contains video upload/validation, FFmpeg scene-change analysis, a durable single-host render queue, basic MP4 export, and optional SRT subtitle burn-in. It is **not yet a complete AI editor**.
 
+## Owner-only access and project APIs (in development)
+
+This branch adds fail-closed HTTP Basic owner authentication. Set `OWNER_PASSWORD` in the Render environment before using the hosted UI; `OWNER_USERNAME` defaults to `owner`. The password must be strong, unique, and stored only in the hosting environment. The public health endpoint remains available to the host. If the password is not configured, protected routes return HTTP 503 rather than opening the studio.
+
+Authenticated project endpoints are being added:
+- `GET /api/projects` — list project summaries.
+- `POST /api/projects` — create a project for one of the three creator profiles.
+- `GET /api/projects/{id}` — load a project manifest.
+- `PUT /api/projects/{id}` — update project content and timeline JSON.
+- `DELETE /api/projects/{id}` — delete a project manifest.
+
+Project manifests use the object-storage adapter. Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` for Cloudflare R2. Without cloud storage configuration, the local adapter is used for development and is ephemeral on hosted free instances. The project APIs do not yet upload media assets or provide the gallery UI.
+
 ## Current features
 
 - Responsive dark-glass and gold interface.
