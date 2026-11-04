@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mind-of-ak-ai-studio",
+  "main": "./cloudflare/src/index.ts",
+  "compatibility_date": "2026-11-04",
+  "containers": [{ "class_name": "MindOfAKContainer", "image": "./Dockerfile", "max_instances": 1 }],
+  "durable_objects": { "bindings": [{ "name": "MIND_OF_AK_CONTAINER", "class_name": "MindOfAKContainer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MindOfAKContainer"] }],
+  "assets": { "directory": "./web", "binding": "ASSETS", "run_worker_first": ["/api/*"] }
+}
