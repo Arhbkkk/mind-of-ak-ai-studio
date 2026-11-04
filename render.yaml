@@ -10,9 +10,9 @@ services:
       - key: PORT
         value: "10000"
       - key: MAX_UPLOAD_MB
-        value: "50"
+        value: "0"
       - key: MAX_SOURCE_DURATION_SECONDS
-        value: "180"
+        value: "600"
       - key: MAX_RENDER_EDGE
         value: "640"
       - key: JOB_DB_PATH
