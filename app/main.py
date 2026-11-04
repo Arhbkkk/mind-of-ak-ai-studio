@@ -673,6 +673,7 @@ async def start_export(
     subtitle_size: int = Form(36),
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
+    timeline_json: str = Form(""),
 ) -> dict:
     if not 20 <= subtitle_size <= 64:
         raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
@@ -685,7 +686,21 @@ async def start_export(
                 raise ValueError("Subtitle files may contain at most 2,000 cues.")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
-    safe_upload(stored_name)
+    source = safe_upload(stored_name)
+    timeline_segments = None
+    if timeline_json.strip():
+        try:
+            timeline_segments = json.loads(timeline_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Timeline data must be valid JSON.") from exc
+        probe = await run_command([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(source)
+        ], timeout=20)
+        try:
+            validate_timeline_segments(timeline_segments, float(probe.stdout.strip()))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid timeline: {exc}") from exc
     payload = {
         "stored_name": stored_name, "preset": preset, "framing": framing,
         "resolution": resolution, "quality": quality,
@@ -697,6 +712,8 @@ async def start_export(
         "subtitle_position": subtitle_position,
         "subtitle_color": subtitle_color,
     }
+    if timeline_segments is not None:
+        payload["timeline_segments"] = timeline_segments
     try:
         job_id = job_store.enqueue(payload, max_active=5)
     except RuntimeError as exc:
