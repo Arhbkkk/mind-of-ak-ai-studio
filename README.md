@@ -36,7 +36,7 @@ The roadmap takes inspiration from professional editing workflows (timeline cont
 - Queue state is shared across API and worker processes and survives API restarts.
 - This starter queue is for one EC2 host and one worker, not a multi-instance distributed queue.
 - Progress currently reports queue/worker state, not exact FFmpeg frame percentage.
-- Optional SRT subtitles can be pasted into the export settings and burned into the MP4. Timestamps must be relative to the selected export clip; subtitle size is limited to 1 MB and 2,000 cues.
+- Optional SRT subtitles can be pasted into export settings and burned into the MP4. Timestamps must be relative to the selected export clip; subtitle size is limited to 1 MB and 2,000 cues. Subtitle appearance supports four font sizes, top/middle/bottom placement, and white/yellow text.
 
 ## Run locally
 
