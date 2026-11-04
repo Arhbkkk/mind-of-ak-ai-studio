@@ -17,3 +17,7 @@ services:
         value: "640"
       - key: JOB_DB_PATH
         value: /tmp/mind-of-ak-jobs.sqlite3
+      - key: OWNER_USERNAME
+        value: owner
+      - key: OWNER_PASSWORD
+        sync: false
