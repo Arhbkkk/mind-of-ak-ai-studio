@@ -310,6 +310,8 @@ async def _render_export_now(
     subtitle_file = None
     subtitle_filter = None
     if subtitle_srt.strip():
+        if not 20 <= subtitle_size <= 64:
+            raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
         if len(subtitle_srt.encode("utf-8")) > 1_000_000:
             raise HTTPException(status_code=413, detail="Subtitle file must be smaller than 1 MB.")
         try:
@@ -471,6 +473,17 @@ async def start_export(
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
 ) -> dict:
+    if not 20 <= subtitle_size <= 64:
+        raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
+    if len(subtitle_srt.encode("utf-8")) > 1_000_000:
+        raise HTTPException(status_code=413, detail="Subtitle file must be smaller than 1 MB.")
+    if subtitle_srt.strip():
+        try:
+            cues = parse_srt(subtitle_srt)
+            if len(cues) > 2000:
+                raise ValueError("Subtitle files may contain at most 2,000 cues.")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
     safe_upload(stored_name)
     payload = {
         "stored_name": stored_name, "preset": preset, "framing": framing,
