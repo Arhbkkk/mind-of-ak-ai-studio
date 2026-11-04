@@ -1,5 +1,5 @@
 export interface Env {
-  ASSETS: Fetcher;
+  ASSETS: { fetch(request: Request): Promise<Response> };
   // Set this in the Cloudflare Worker dashboard to the Render backend origin,
   // for example: https://mind-of-ak-api.onrender.com
   API_ORIGIN?: string;
