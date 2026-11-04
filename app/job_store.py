@@ -28,7 +28,6 @@ def claim_next():
     now=time.time()
     with _connect() as db:
         db.execute("BEGIN IMMEDIATE")
-        db.execute("UPDATE render_jobs SET status='failed',progress=0,error='Worker stopped or render exceeded its lease.',message='Render interrupted.',updated_at=? WHERE status='running' AND started_at < ?",(now,now-600))
         row=db.execute("SELECT job_id,payload_json FROM render_jobs WHERE status='queued' ORDER BY created_at LIMIT 1").fetchone()
         if row is None: return None
         changed=db.execute("UPDATE render_jobs SET status='running',progress=5,message='Worker started FFmpeg render.',started_at=?,updated_at=? WHERE job_id=? AND status='queued'",(now,now,row["job_id"])).rowcount
@@ -42,3 +41,9 @@ def get_job(job_id: str):
     if row is None: return None
     item=dict(row); item["result"]=json.loads(item["result_json"]) if item["result_json"] else None
     item.pop("result_json",None); item.pop("payload_json",None); return item
+
+def recover_interrupted_jobs():
+    """Requeue jobs left running by a worker process that was restarted."""
+    now=time.time()
+    with _connect() as db:
+        db.execute("UPDATE render_jobs SET status='queued',progress=0,message='Re-queued after worker restart.',started_at=NULL,updated_at=? WHERE status='running'",(now,))
