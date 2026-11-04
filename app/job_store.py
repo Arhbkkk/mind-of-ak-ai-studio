@@ -15,6 +15,7 @@ def init_db():
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("""CREATE TABLE IF NOT EXISTS render_jobs (job_id TEXT PRIMARY KEY,status TEXT NOT NULL,progress INTEGER NOT NULL DEFAULT 0,message TEXT NOT NULL DEFAULT '',payload_json TEXT NOT NULL,result_json TEXT,error TEXT,created_at REAL NOT NULL,updated_at REAL NOT NULL,started_at REAL)""")
         db.execute("CREATE INDEX IF NOT EXISTS idx_render_jobs_status_created ON render_jobs(status, created_at)")
+    prune_old_jobs()
 def enqueue(payload: dict[str, Any], max_active: int = 5) -> str:
     now=time.time()
     with _connect() as db:
@@ -47,3 +48,14 @@ def recover_interrupted_jobs():
     now=time.time()
     with _connect() as db:
         db.execute("UPDATE render_jobs SET status='queued',progress=0,message='Re-queued after worker restart.',started_at=NULL,updated_at=? WHERE status='running'",(now,))
+
+def prune_old_jobs(retention_days: int | None = None) -> int:
+    """Delete old terminal job records while retaining queued and running jobs."""
+    days = retention_days if retention_days is not None else max(1, int(os.getenv("JOB_RETENTION_DAYS", "7")))
+    cutoff = time.time() - max(1, days) * 86400
+    with _connect() as db:
+        cursor = db.execute(
+            "DELETE FROM render_jobs WHERE status IN ('completed','failed') AND updated_at < ?",
+            (cutoff,),
+        )
+        return cursor.rowcount
