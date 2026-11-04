@@ -18,6 +18,12 @@ class JobStoreTests(unittest.TestCase):
     def test_queue_limit(self):
         for _ in range(5): job_store.enqueue({})
         with self.assertRaises(RuntimeError): job_store.enqueue({})
+    def test_worker_restart_requeues_running_job(self):
+        jid=job_store.enqueue({})
+        job_store.claim_next()
+        job_store.recover_interrupted_jobs()
+        self.assertEqual(job_store.get_job(jid)["status"],"queued")
+        self.assertIsNotNone(job_store.claim_next())
     def test_claim_once(self):
         job_store.enqueue({})
         self.assertIsNotNone(job_store.claim_next())
