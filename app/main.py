@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt, validate_timeline_segments
 from app.subtitles import build_subtitle_filter
@@ -467,6 +467,7 @@ async def _render_export_now(
     subtitle_size: int = Form(36),
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
+    persist_export: bool = True,
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -618,6 +619,14 @@ async def _render_export_now(
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+    durable_storage = False
+    if persist_export and r2_storage.configured():
+        try:
+            r2_storage.save_export(output_name, output)
+            durable_storage = True
+        except Exception as exc:
+            output.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail="Render completed but saving the export to R2 failed. The export was not marked as saved.") from exc
     cleanup_old_files()
     return {
         "ok": True,
@@ -635,6 +644,7 @@ async def _render_export_now(
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
         "subtitles_burned_in": bool(subtitle_srt.strip()),
+        "durable_storage": durable_storage,
         "message": "Export completed with framing, color look, optional fades, audio volume and optional burned-in SRT subtitles. AI-directed editing is not included yet.",
     }
 
@@ -715,6 +725,7 @@ async def _render_timeline_now(
                 subtitle_size=subtitle_size,
                 subtitle_position=subtitle_position,
                 subtitle_color=subtitle_color,
+                persist_export=False,
             )
             parts.append(EXPORT_DIR / part["filename"])
 
@@ -741,6 +752,13 @@ async def _render_timeline_now(
         duration = float(metadata.get("format", {}).get("duration") or 0)
         if duration <= 0 or not video:
             raise HTTPException(status_code=422, detail="Timeline export is missing a valid video stream.")
+        durable_storage = False
+        if r2_storage.configured():
+            try:
+                r2_storage.save_export(final_name, final_path)
+                durable_storage = True
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail="Timeline rendered but durable R2 storage failed.") from exc
         cleanup_old_files()
         completed = True
         return {
@@ -758,6 +776,7 @@ async def _render_timeline_now(
             "color_style": color_style,
             "timeline_clips": len(ranges),
             "subtitles_burned_in": bool(subtitle_srt.strip()),
+            "durable_storage": durable_storage,
             "message": "Ordered timeline clips rendered and joined with hard cuts. Transitions and multiple source files are not supported yet.",
         }
     finally:
@@ -858,6 +877,12 @@ async def export_status(job_id: str) -> dict:
 async def download_export(filename: str) -> FileResponse:
     if Path(filename).name != filename or not re.fullmatch(r"ak_export_[a-f0-9]{32}\.mp4", filename):
         raise HTTPException(status_code=400, detail="Invalid export reference.")
+    if r2_storage.configured():
+        try:
+            url = r2_storage.presign_saved_export(filename, expires_in=900)
+            return RedirectResponse(url, status_code=307)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Saved export was not found in R2.") from exc
     path = EXPORT_DIR / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export not found. It may have expired after a host restart.")
