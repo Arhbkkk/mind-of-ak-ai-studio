@@ -32,7 +32,7 @@ The gallery persists project manifests, script/notes, subtitles and timeline JSO
 
 - Responsive dark-glass and gold interface.
 - Upload video files in MP4, MOV, M4V, WEBM, or MKV format.
-- Direct multipart source uploads to Cloudflare R2 in 8 MiB chunks when configured, with a separate `MAX_DIRECT_UPLOAD_MB` cap (default 2048 MB); backend-proxy fallback remains available when R2 is not configured.
+- Direct multipart source uploads to Cloudflare R2 in 8 MiB chunks when configured, with a separate `MAX_DIRECT_UPLOAD_MB` cap (default 512 MB); backend-proxy fallback remains available when R2 is not configured.
 - Validate that an upload contains a readable video stream using FFprobe.
 - Read duration, resolution, codec, frame rate, and audio-stream presence.
 - Find visual scene-change candidates using FFmpeg's scene-change filter. This is visual-change detection, not semantic AI scene understanding.
