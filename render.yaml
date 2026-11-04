@@ -1,13 +1,19 @@
 services:
   - type: web
-    name: mind-of-ak-ai-studio
+    name: mind-of-ak-api
     runtime: docker
     plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /api/health
     envVars:
+      - key: PORT
+        value: "10000"
       - key: MAX_UPLOAD_MB
         value: "50"
       - key: MAX_SOURCE_DURATION_SECONDS
         value: "180"
-      - key: TEMP_FILE_MAX_AGE_SECONDS
-        value: "43200"
+      - key: MAX_RENDER_EDGE
+        value: "640"
+      - key: JOB_DB_PATH
+        value: /tmp/mind-of-ak-jobs.sqlite3

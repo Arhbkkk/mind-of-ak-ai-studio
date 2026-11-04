@@ -1,0 +1,14 @@
+{
+  "name": "Mind of AK AI Studio",
+  "short_name": "Mind of AK",
+  "description": "Local-first video creator workspace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#101010",
+  "theme_color": "#101010",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

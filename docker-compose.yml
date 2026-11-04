@@ -1,0 +1,29 @@
+services:
+  web:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment:
+      JOB_DB_PATH: /data/jobs.sqlite3
+      UPLOAD_DIR: /data/uploads
+      EXPORT_DIR: /data/exports
+      MAX_UPLOAD_MB: "50"
+      MAX_SOURCE_DURATION_SECONDS: "180"
+      MAX_RENDER_EDGE: "640"
+      TEMP_FILE_MAX_AGE_SECONDS: "43200"
+    volumes: [studio-data:/data]
+    ports: ["127.0.0.1:8000:8000"]
+    restart: unless-stopped
+  worker:
+    build: .
+    command: python -m app.worker
+    environment:
+      JOB_DB_PATH: /data/jobs.sqlite3
+      UPLOAD_DIR: /data/uploads
+      EXPORT_DIR: /data/exports
+      MAX_SOURCE_DURATION_SECONDS: "180"
+      WORKER_POLL_SECONDS: "2"
+    volumes: [studio-data:/data]
+    restart: unless-stopped
+    depends_on: [web]
+volumes:
+  studio-data:

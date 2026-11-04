@@ -1,0 +1,46 @@
+name: CI
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Compile Python modules
+        run: python -m compileall -q app tests
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application image
+        run: docker build -t mind-of-ak-ai-studio:ci .
+      - name: Smoke-test FFmpeg Tamil subtitle rendering
+        run: docker run --rm -v "$PWD/tests:/tests:ro" mind-of-ak-ai-studio:ci python -m unittest discover -s /tests -p test_ffmpeg_subtitle_integration.py -v
+  cloudflare-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Cloudflare dependencies
+        run: npm install
+      - name: Generate Cloudflare bindings and type-check
+        run: npx wrangler types && npx tsc --noEmit
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check web/local-storage.js
+          python -c "from pathlib import Path; import re; html=Path('web/index.html').read_text(); scripts=re.findall(r'<script>(.*?)</script>', html, re.S); assert len(scripts)==1, 'Expected one inline app script'; Path('/tmp/mind-of-ak-inline.js').write_text(scripts[0])"
+          node --check /tmp/mind-of-ak-inline.js

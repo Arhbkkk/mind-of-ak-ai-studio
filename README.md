@@ -1,8 +1,8 @@
 # Mind of AK AI Studio
 
-Mind of AK AI Studio is a browser-based creator workspace being developed in stages. This repository currently contains a working upload/validation, FFmpeg scene-change analysis, and basic MP4 export foundation. It is **not yet a complete AI editor**.
+Mind of AK AI Studio is a browser-based creator workspace being developed in stages. This repository contains video upload/validation, FFmpeg scene-change analysis, a durable single-host render queue, basic MP4 export, and optional SRT subtitle burn-in. It is **not yet a complete AI editor**.
 
-## Current Phase 2 features
+## Current features
 
 - Responsive dark-glass and gold interface.
 - Upload video files in MP4, MOV, M4V, WEBM, or MKV format.
@@ -25,9 +25,19 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 - Tamil/English TTS, original music, sleep ambience, and kids' story narration.
 - AI asset search and licensing verification, generated diagrams, puzzle drawings, or B-roll insertion.
 - Natural denoise, stabilization, color grading, super-resolution/upscaling, or any guarantee of increased source detail.
-- Voice Studio, Style DNA, project accounts, cloud project persistence, collaborative editing, or queued/background render jobs.
+- Voice Studio, Style DNA, project accounts, cloud project persistence, or collaborative editing.
 
 The roadmap takes inspiration from professional editing workflows (timeline control, precise trimming, audio mixing, color management, captions, proxy workflows, and export presets) without copying proprietary source code, brand assets, or protected UI designs from other products.
+
+## Durable render queue and subtitle export
+
+- Render requests are persisted in SQLite rather than an in-memory dictionary.
+- The API enqueues work; a separate worker process executes FFmpeg.
+- Worker restarts re-queue interrupted jobs. Old completed/failed job records are pruned after `JOB_RETENTION_DAYS` (default 7).
+- Queue state is shared across API and worker processes and survives API restarts.
+- This starter queue is for one EC2 host and one worker, not a multi-instance distributed queue.
+- Progress currently reports queue/worker state, not exact FFmpeg frame percentage.
+- Optional SRT subtitles can be pasted into export settings and burned into the MP4. Timestamps must be relative to the selected export clip; subtitle size is limited to 1 MB and 2,000 cues. Subtitle appearance supports four font sizes, top/middle/bottom placement, and white/yellow text.
 
 ## Run locally
 
@@ -40,7 +50,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Open `http://localhost:8000`.
 
-FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile installs FFmpeg, which also supplies FFprobe.
+For the full queue/worker setup, use `docker compose up --build` and open `http://127.0.0.1:8000`. FFmpeg, FFprobe and Noto fonts are installed in the Docker image. A local Python-only run needs FFmpeg and FFprobe installed separately.
 
 ## API
 
@@ -49,7 +59,8 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 - `POST /api/upload` — multipart field `file`; validates the uploaded video.
 - `GET /api/analyze/{stored_name}` — technical metadata and visual scene-change candidates.
 - `POST /api/validate` — multipart fields `stored_name`, optional `script`, optional `.srt` file field `srt_file`, and optional externally generated `transcript_text`. Returns PASS/WARNING/FAIL/NOT_VERIFIED checks. A supplied transcript is compared as text only; it is not generated from audio here.
-- `POST /api/export` — multipart fields: `stored_name`, `preset` (`original`, `vertical`, `square`), `quality` (`high`, `balanced`, `small`), `start_seconds`, `end_seconds` (0 means source end).
+- `POST /api/export` — queues an export. Supports `stored_name`, `preset`, `framing`, `resolution`, `quality`, trim times, color/fade/audio controls, optional `subtitle_srt`, `subtitle_size`, `subtitle_position`, and `subtitle_color`.
+- `GET /api/export-status/{job_id}` — render queue/worker status.
 - `GET /api/download/{filename}` — download a completed export.
 
 ## Environment variables
@@ -57,13 +68,21 @@ FFmpeg and FFprobe must be installed and available on PATH. The Dockerfile insta
 - `MAX_UPLOAD_MB`: upload limit (default 2048 MB). Set this to a value your hosting platform can safely accept.
 - `UPLOAD_DIR`: source upload directory (default `/tmp/mind-of-ak-uploads`).
 - `EXPORT_DIR`: rendered output directory (default `/tmp/mind-of-ak-exports`).
+- `JOB_DB_PATH`: SQLite render queue database path (set to `/data/jobs.sqlite3` in Compose).
+- `JOB_RETENTION_DAYS`: retain completed/failed queue records for this many days (default 7).
+- `MAX_RENDER_EDGE`: maximum output long edge in pixels (default 640; increase only on a host with enough memory).
+
+## Free-first deployment
+
+See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The frontend is served by Cloudflare Worker Static Assets. The Worker proxies `/api/*` to a separate Render-hosted FastAPI + FFmpeg service using the free web-service plan. Render free services can sleep and have ephemeral storage and limited compute; this is a prototype setup, not durable production hosting. Configure the Cloudflare Worker variable `API_ORIGIN` after deploying the Render service.
+
 
 ## Deployment and safety notes
 
-- The current implementation runs FFmpeg synchronously in the web process. Long renders may time out or consume too much memory/CPU on free hosting; this is a prototype, not production render infrastructure. The 2 GB upload default is only an application-level limit and does not guarantee that the host or reverse proxy accepts files that large.
+- FFmpeg renders run in a separate worker, but the queue is SQLite-backed and designed for one host/one worker only. It is not a distributed production queue. Long renders may still consume substantial CPU, memory and disk. The 2 GB upload default is only an application-level limit and does not guarantee that the host or reverse proxy accepts files that large.
 - Files in `/tmp` are ephemeral. A host restart or redeploy can remove sources and exports.
 - There is no authentication or per-user project isolation yet. Do not upload confidential or sensitive footage to this public demo.
-- Before production, add authentication, persistent object storage, background workers and a job queue, progress reporting, concurrency/rate limits, automatic cleanup, and monitoring.
+- Before public production, add authentication, per-user project isolation, private object storage, distributed job orchestration, accurate FFmpeg progress, stronger quotas/rate limits, and monitoring.
 - AI model keys must stay server-side. Any future voice/music/assets feature must respect provider terms and the relevant licences. Do not promise copyright safety without verifying asset rights.
 - Video quality enhancement can improve perceived quality in suitable cases, but it cannot reliably recover details absent from the source. Keep enhancement optional and avoid synthetic-looking faces/textures.
 

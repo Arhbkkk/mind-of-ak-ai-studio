@@ -14,7 +14,9 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from app.validation import compare_script_to_transcript, validate_subtitles
+from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
+from app.subtitles import build_subtitle_filter
+from app import job_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -23,6 +25,7 @@ EXPORT_DIR = Path(os.getenv("EXPORT_DIR", "/tmp/mind-of-ak-exports"))
 MAX_UPLOAD_MB = max(1, int(os.getenv("MAX_UPLOAD_MB", "2048")))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_SOURCE_DURATION_SECONDS = max(30, int(os.getenv("MAX_SOURCE_DURATION_SECONDS", "300")))
+MAX_RENDER_EDGE = max(640, int(os.getenv("MAX_RENDER_EDGE", "640")))
 TEMP_FILE_MAX_AGE_SECONDS = max(3600, int(os.getenv("TEMP_FILE_MAX_AGE_SECONDS", "43200")))
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,7 +51,8 @@ def cleanup_old_files() -> None:
 
 cleanup_old_files()
 
-app = FastAPI(title="Mind of AK AI Studio", version="0.4.0")
+app = FastAPI(title="Mind of AK AI Studio", version="0.5.0")
+job_store.init_db()
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
@@ -92,7 +96,8 @@ async def health() -> dict:
         "ffprobe_available": shutil.which("ffprobe") is not None,
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_source_duration_seconds": MAX_SOURCE_DURATION_SECONDS,
-        "pipeline_version": "0.4.0",
+        "max_render_edge": MAX_RENDER_EDGE,
+        "pipeline_version": "0.5.0",
         "validation_endpoint": "/api/validate",
     }
 
@@ -273,6 +278,10 @@ async def _render_export_now(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    subtitle_srt: str = Form(""),
+    subtitle_size: int = Form(36),
+    subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
+    subtitle_color: Literal["white", "yellow"] = Form("white"),
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -298,12 +307,33 @@ async def _render_export_now(
         raise HTTPException(status_code=413, detail="This starter export supports up to 5 minutes per render. Shorten the clip and retry.")
 
     clip_duration = effective_end - start_seconds
+    subtitle_file = None
+    subtitle_filter = None
+    if subtitle_srt.strip():
+        if not 20 <= subtitle_size <= 64:
+            raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
+        if len(subtitle_srt.encode("utf-8")) > 1_000_000:
+            raise HTTPException(status_code=413, detail="Subtitle file must be smaller than 1 MB.")
+        try:
+            subtitle_cues = parse_srt(subtitle_srt)
+            if len(subtitle_cues) > 2000:
+                raise ValueError("Subtitle files may contain at most 2,000 cues.")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
+        subtitle_check = validate_subtitles(subtitle_srt, clip_duration)
+        if subtitle_check["status"] == "FAIL":
+            raise HTTPException(status_code=422, detail="Subtitle timestamps must fit inside the selected export clip. Use clip-relative timestamps starting at 00:00:00,000.")
     if not 0 <= fade_seconds <= 3:
         raise HTTPException(status_code=422, detail="Fade duration must be between 0 and 3 seconds.")
     if fade_seconds * 2 > clip_duration:
         raise HTTPException(status_code=422, detail="Fade-in and fade-out together cannot exceed the clip duration.")
     if not 0 <= audio_volume <= 2:
         raise HTTPException(status_code=422, detail="Audio volume must be between 0 and 2.")
+
+    if subtitle_srt.strip():
+        subtitle_file = EXPORT_DIR / f"ak_subtitles_{uuid.uuid4().hex}.srt"
+        subtitle_file.write_text(subtitle_srt, encoding="utf-8")
+        subtitle_filter = build_subtitle_filter(subtitle_file, subtitle_size, subtitle_position, subtitle_color)
 
     output_name = f"ak_export_{uuid.uuid4().hex}.mp4"
     output = EXPORT_DIR / output_name
@@ -332,13 +362,10 @@ async def _render_export_now(
         }
         target_width, target_height = dimensions[resolution][preset]
 
-    # Render instances on the free 512 MiB plan can be OOM-killed by 1080p/4K
-    # blur graphs. Cap the actual render canvas to 720p-class dimensions while
-    # keeping the selected aspect ratio; higher resolution presets are advisory
-    # only on this constrained host.
-    max_render_edge = 640
-    if max(target_width, target_height) > max_render_edge:
-        ratio = max_render_edge / max(target_width, target_height)
+    # Keep low-memory deployments safe by default, but let larger hosts opt in
+    # to higher output dimensions through MAX_RENDER_EDGE.
+    if max(target_width, target_height) > MAX_RENDER_EDGE:
+        ratio = MAX_RENDER_EDGE / max(target_width, target_height)
         target_width = max(2, int(target_width * ratio) // 2 * 2)
         target_height = max(2, int(target_height * ratio) // 2 * 2)
 
@@ -357,6 +384,8 @@ async def _render_export_now(
         "mono": "hue=s=0,eq=contrast=1.08",
     }
     video_filters = base_filters + [looks[color_style]]
+    if subtitle_filter:
+        video_filters.append(subtitle_filter)
     if fade_seconds > 0:
         video_filters.append(f"fade=t=in:st=0:d={fade_seconds}")
         video_filters.append(f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}")
@@ -380,9 +409,14 @@ async def _render_export_now(
         )
         if fade_seconds > 0:
             complex_filters += f",fade=t=in:st=0:d={fade_seconds},fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"
+        if subtitle_filter:
+            complex_filters += f",{subtitle_filter}"
         command.extend(["-filter_complex", complex_filters + "[vout]", "-map", "[vout]"])
     elif framing == "blur" and preset == "original":
-        command.extend(["-vf", ",".join([f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else []))])
+        original_filters = [f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease", "pad=ceil(iw/2)*2:ceil(ih/2)*2", looks[color_style]] + ([f"fade=t=in:st=0:d={fade_seconds}", f"fade=t=out:st={max(0, clip_duration - fade_seconds)}:d={fade_seconds}"] if fade_seconds > 0 else [])
+        if subtitle_filter:
+            original_filters.append(subtitle_filter)
+        command.extend(["-vf", ",".join(original_filters)])
     else:
         command.extend(["-vf", ",".join(video_filters + ["pad=ceil(iw/2)*2:ceil(ih/2)*2"])])
     command.extend([
@@ -390,7 +424,11 @@ async def _render_export_now(
         "-c:v", "libx264", "-threads", "1", "-preset", "ultrafast", "-crf", crf,
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output)
     ])
-    result = await run_command(command, timeout=240)
+    try:
+        result = await run_command(command, timeout=240)
+    finally:
+        if subtitle_file is not None:
+            subtitle_file.unlink(missing_ok=True)
     if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
@@ -411,15 +449,13 @@ async def _render_export_now(
         "color_style": color_style,
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
-        "message": "Creative export completed with framing, color look, optional fades, and audio volume. AI-directed editing is not included yet.",
+        "subtitles_burned_in": bool(subtitle_srt.strip()),
+        "message": "Export completed with framing, color look, optional fades, audio volume and optional burned-in SRT subtitles. AI-directed editing is not included yet.",
     }
 
 
 
-# In-process render jobs keep long FFmpeg work out of the browser's initial HTTP request.
-# For multi-instance/production reliability, replace this dictionary with a durable queue.
-_EXPORT_JOBS: dict[str, dict] = {}
-
+# Render jobs persist in SQLite; a separate worker executes FFmpeg.
 @app.post("/api/export")
 async def start_export(
     stored_name: str = Form(...),
@@ -432,67 +468,57 @@ async def start_export(
     color_style: Literal["natural", "cinematic", "warm", "mono"] = Form("natural"),
     fade_seconds: float = Form(0),
     audio_volume: float = Form(1),
+    subtitle_srt: str = Form(""),
+    subtitle_size: int = Form(36),
+    subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
+    subtitle_color: Literal["white", "yellow"] = Form("white"),
 ) -> dict:
-    # The worker runs FFmpeg with a 240-second timeout. Clear any in-memory job
-    # that has exceeded a generous 5-minute deadline, otherwise a killed worker
-    # can leave exports permanently locked until the next service restart.
-    now = time.time()
-    for stale_id, stale_job in list(_EXPORT_JOBS.items()):
-        if stale_job.get("status") in ("queued", "running"):
-            started_at = stale_job.get("started_at", stale_job.get("created_at", now))
-            if now - started_at > 300:
-                stale_job.update(status="failed", progress=0,
-                                 error="Export timed out or its worker stopped. Please start a new export.")
-                print(f"EXPORT_JOB_STALE id={stale_id} age_seconds={int(now - started_at)}", flush=True)
-    # This single-process service has no external queue; reject only active renders.
-    if any(job.get("status") in ("queued", "running") for job in _EXPORT_JOBS.values()):
-        raise HTTPException(status_code=429, detail="Another export is still running. Wait for it to finish before starting another render.")
-    # Fail fast for missing sources; the render itself runs asynchronously.
-    safe_upload(stored_name)
-    job_id = uuid.uuid4().hex
-    _EXPORT_JOBS[job_id] = {"status": "queued", "progress": 0, "message": "Render queued.", "created_at": time.time(), "started_at": time.time()}
-
-    async def run_job() -> None:
-        _EXPORT_JOBS[job_id].update(status="running", progress=1, message="FFmpeg render started.")
-        print(f"EXPORT_JOB_START id={job_id} preset={preset} framing={framing} resolution={resolution}", flush=True)
+    if not 20 <= subtitle_size <= 64:
+        raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
+    if len(subtitle_srt.encode("utf-8")) > 1_000_000:
+        raise HTTPException(status_code=413, detail="Subtitle file must be smaller than 1 MB.")
+    if subtitle_srt.strip():
         try:
-            result = await _render_export_now(
-                stored_name=stored_name,
-                preset=preset,
-                framing=framing,
-                resolution=resolution,
-                quality=quality,
-                start_seconds=start_seconds,
-                end_seconds=end_seconds,
-                color_style=color_style,
-                fade_seconds=fade_seconds,
-                audio_volume=audio_volume,
-            )
-            _EXPORT_JOBS[job_id].update(status="completed", progress=100, message="Export completed.", result=result)
-            print(f"EXPORT_JOB_COMPLETE id={job_id} bytes={result.get('size_bytes')}", flush=True)
-        except HTTPException as exc:
-            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=str(exc.detail))
-            print(f"EXPORT_JOB_FAILED id={job_id} status={exc.status_code} error={exc.detail}", flush=True)
-        except Exception as exc:
-            _EXPORT_JOBS[job_id].update(status="failed", progress=0, error=f"Unexpected render error: {type(exc).__name__}: {exc}")
-            print(f"EXPORT_JOB_CRASH id={job_id} error={type(exc).__name__}: {exc}", flush=True)
-
-    asyncio.create_task(run_job())
-    return {"ok": True, "job_id": job_id, "status": "queued", "status_url": f"/api/export-status/{job_id}"}
+            cues = parse_srt(subtitle_srt)
+            if len(cues) > 2000:
+                raise ValueError("Subtitle files may contain at most 2,000 cues.")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
+    safe_upload(stored_name)
+    payload = {
+        "stored_name": stored_name, "preset": preset, "framing": framing,
+        "resolution": resolution, "quality": quality,
+        "start_seconds": start_seconds, "end_seconds": end_seconds,
+        "color_style": color_style, "fade_seconds": fade_seconds,
+        "audio_volume": audio_volume,
+        "subtitle_srt": subtitle_srt,
+        "subtitle_size": subtitle_size,
+        "subtitle_position": subtitle_position,
+        "subtitle_color": subtitle_color,
+    }
+    try:
+        job_id = job_store.enqueue(payload, max_active=5)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {"ok": True, "job_id": job_id, "status": "queued",
+            "status_url": f"/api/export-status/{job_id}"}
 
 
 @app.get("/api/export-status/{job_id}")
 async def export_status(job_id: str) -> dict:
     if not re.fullmatch(r"[a-f0-9]{32}", job_id):
         raise HTTPException(status_code=400, detail="Invalid render job ID.")
-    job = _EXPORT_JOBS.get(job_id)
+    job = job_store.get_job(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="Render job not found. The service may have restarted; please submit the export again.")
-    response = {"ok": True, "job_id": job_id, "status": job["status"], "progress": job.get("progress", 0), "message": job.get("message", "")}
+        raise HTTPException(status_code=404, detail="Render job not found.")
+    response = {
+        "ok": True, "job_id": job_id, "status": job["status"],
+        "progress": job["progress"], "message": job["message"],
+    }
     if job["status"] == "completed":
         response["result"] = job["result"]
     elif job["status"] == "failed":
-        response["error"] = job.get("error", "Unknown render failure.")
+        response["error"] = job["error"] or "Unknown render failure."
     return response
 
 
