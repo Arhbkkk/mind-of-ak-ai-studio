@@ -3,7 +3,7 @@ from __future__ import annotations
 import json, os, sqlite3, time, uuid
 from pathlib import Path
 from typing import Any
-DB_PATH = Path(os.getenv("JOB_DB_PATH", "/data/jobs.sqlite3"))
+DB_PATH = Path(os.getenv("JOB_DB_PATH", "/tmp/mind-of-ak-jobs.sqlite3"))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 def _connect():
     db = sqlite3.connect(DB_PATH, timeout=30)
