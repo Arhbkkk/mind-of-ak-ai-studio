@@ -72,9 +72,9 @@ For the full queue/worker setup, use `docker compose up --build` and open `http:
 - `JOB_RETENTION_DAYS`: retain completed/failed queue records for this many days (default 7).
 - `MAX_RENDER_EDGE`: maximum output long edge in pixels (default 640; increase only on a host with enough memory).
 
-## Cloudflare deployment
+## Free-first deployment
 
-See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The Cloudflare starter uses a Worker for routing/static assets and a Cloudflare Container for the existing FastAPI + FFmpeg application. Containers require the Workers Paid plan; this is not a zero-cost deployment. Durable R2 media storage and authentication remain required before public production.
+See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The frontend is served by Cloudflare Worker Static Assets. The Worker proxies `/api/*` to a separate Render-hosted FastAPI + FFmpeg service using the free web-service plan. Render free services can sleep and have ephemeral storage and limited compute; this is a prototype setup, not durable production hosting. Configure the Cloudflare Worker variable `API_ORIGIN` after deploying the Render service.
 
 
 ## Deployment and safety notes
