@@ -97,7 +97,7 @@ class S3ObjectStore:
         secret = secret_key or os.getenv("R2_SECRET_ACCESS_KEY") or os.getenv("S3_SECRET_ACCESS_KEY")
         if bool(access) != bool(secret):
             raise StorageError("Both object-storage access key and secret key are required.")
-        kwargs: dict[str, Any] = {"region_name": region or "us-east-1", "config": Config(signature_version="s3v4")}
+        kwargs: dict[str, Any] = {"region_name": region or "us-east-1", "config": Config(signature_version="s3v4", s3={"addressing_style": "path"})}
         if endpoint_url:
             kwargs["endpoint_url"] = endpoint_url
         if access and secret:
