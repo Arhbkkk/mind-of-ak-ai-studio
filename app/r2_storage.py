@@ -105,7 +105,7 @@ def _validate_key(key: str) -> None:
 
 def save_export(filename: str, source: Path) -> str:
     """Persist a completed MP4 under a non-expiring saved/ key."""
-    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\\.mp4", filename):
+    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\.mp4", filename):
         raise ValueError("Invalid export filename.")
     key = f"saved/{filename}"
     client().upload_file(
@@ -116,7 +116,7 @@ def save_export(filename: str, source: Path) -> str:
 
 
 def presign_saved_export(filename: str, expires_in: int = 900) -> str:
-    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\\.mp4", filename):
+    if not re.fullmatch(r"ak_export_[a-f0-9]{32}\.mp4", filename):
         raise ValueError("Invalid export filename.")
     return client().generate_presigned_url(
         "get_object",
