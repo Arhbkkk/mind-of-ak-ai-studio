@@ -5,7 +5,7 @@ export interface Env {
   ASSETS: Fetcher;
 }
 
-export class MindOfAKContainer extends Container<Env> {
+export class MindOfAKContainer extends Container {
   defaultPort = 8000;
   sleepAfter = "10m";
 }
