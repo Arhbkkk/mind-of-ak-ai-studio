@@ -8,7 +8,7 @@ Add these in the Render service environment. Never commit credentials:
 - R2_ACCESS_KEY_ID: R2 token Access Key ID
 - R2_SECRET_ACCESS_KEY: R2 token Secret Access Key
 - R2_BUCKET: mind-of-ak-media
-- MAX_DIRECT_UPLOAD_MB: direct source upload cap (default 2048 MB)
+- MAX_DIRECT_UPLOAD_MB: direct source upload cap (default 512 MB)
 
 Keep the R2 token scoped to this bucket with Object Read & Write. Do not expose credentials to the browser or Cloudflare Worker.
 
@@ -40,7 +40,7 @@ Create an R2 lifecycle rule for prefix temporary/ to expire objects after 2 days
 - saved/: final MP4 exports; no lifecycle expiry.
 - owners/owner/projects/: owner project manifests; no lifecycle expiry.
 
-Source videos are uploaded directly to R2 in 8 MiB chunks when the R2 environment is configured. The backend downloads a temporary working copy for FFmpeg, so CPU, memory and disk limits on Render still apply. Direct uploads are capped by MAX_DIRECT_UPLOAD_MB and source duration remains capped at 10 minutes.
+Source videos are uploaded directly to R2 in 8 MiB chunks when the R2 environment is configured. The backend downloads a temporary working copy for FFmpeg, so CPU, memory and disk limits on Render still apply. Direct uploads are capped by MAX_DIRECT_UPLOAD_MB and source duration remains capped at 10 minutes, but the 512 MB default cap and Render disk space can be lower practical limits.
 
 Completed final MP4 exports are copied to saved/ and downloads use a short-lived 15-minute presigned URL. The authenticated API controls access to the signed download redirect. Project manifests are persisted through the same R2 bucket.
 
