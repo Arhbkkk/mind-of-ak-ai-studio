@@ -547,10 +547,10 @@ def _slice_srt_for_source_range(srt_text: str, source_start: float, source_end: 
         if end <= start:
             continue
         output.append(
-            f"{len(output) + 1}\\n{_srt_timestamp(start - source_start)} --> "
-            f"{_srt_timestamp(end - source_start)}\\n{cue['text']}"
+            f"{len(output) + 1}\n{_srt_timestamp(start - source_start)} --> "
+            f"{_srt_timestamp(end - source_start)}\n{cue['text']}"
         )
-    return "\\n\\n".join(output)
+    return "\n\n".join(output)
 
 
 async def _render_timeline_now(
@@ -560,8 +560,6 @@ async def _render_timeline_now(
     framing: str,
     resolution: str,
     quality: str,
-    start_seconds: float,
-    end_seconds: float,
     color_style: str,
     fade_seconds: float,
     audio_volume: float,
@@ -609,7 +607,7 @@ async def _render_timeline_now(
             parts.append(EXPORT_DIR / part["filename"])
 
         concat_file.write_text(
-            "".join("file '" + str(path).replace("'", "'\\''") + "'\\n" for path in parts),
+            "".join("file '" + str(path).replace("'", "'\\''") + "'\n" for path in parts),
             encoding="utf-8",
         )
         joined = await run_command([
@@ -690,6 +688,8 @@ async def start_export(
             raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
     source = safe_upload(stored_name)
     timeline_segments = None
+    if len(timeline_json.encode("utf-8")) > 20_000:
+        raise HTTPException(status_code=413, detail="Timeline data exceeds the 20 KB limit.")
     if timeline_json.strip():
         try:
             timeline_segments = json.loads(timeline_json)
