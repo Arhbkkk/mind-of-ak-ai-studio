@@ -201,7 +201,7 @@ async def get_project_media(project_id: str, stored_name: str):
 async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
     try:
         project = project_repository.get(project_id)
-        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings", "}
+        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings"}
         for key in allowed:
             if key in payload:
                 project[key] = payload[key]
