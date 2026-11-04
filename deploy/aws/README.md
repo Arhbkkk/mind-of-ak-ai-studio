@@ -6,7 +6,7 @@ This is a single-EC2 Docker Compose starter: FastAPI and a dedicated render work
 
 AWS is not guaranteed to be permanently free. EC2, EBS, public IPv4, data transfer, snapshots, logs and tax can incur charges. Eligibility and quotas depend on your account, region and current offer. Verify pricing and create a small AWS Budget alert before provisioning. A budget alert is not a spending cap. Do not add NAT Gateway, RDS, ElastiCache, GPU instances or load balancers for this starter.
 
-A micro instance is only suitable for development and short low-resolution renders. FFmpeg is CPU and memory intensive.
+A micro instance is only suitable for development and short low-resolution renders. FFmpeg is CPU and memory intensive. The Compose default sets `MAX_RENDER_EDGE=640`; on a larger instance, increase this environment variable (for example, 1920) only after load-testing memory and render times. The selected resolution in the UI cannot exceed this configured long-edge cap.
 
 ## Deployment
 
