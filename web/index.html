@@ -14,16 +14,16 @@
 <section class="hero"><div class="eyebrow">Creator workspace · Built in stages</div><h1>Your footage.<br><span>Your signature.</span></h1><p>Upload a clip, inspect its technical details and scene-change candidates, then export a clean MP4 with a format and quality you control. This starter build supports validated uploads, scene-change analysis and memory-conscious MP4 exports. AI-directed editing features are being added in stages.</p></section>
 <section class="layout"><div class="panel">
 <h2>01 / Source &amp; analysis</h2><p class="sub">Select a video. The server validates that it is readable before enabling analysis and export.</p>
-<div class="drop"><div><div class="upload-icon">↑</div><strong>Bring your footage</strong><small>MP4, MOV, M4V, WEBM, MKV · 50 MB maximum on this hosting plan</small><input id="videoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v" hidden><button class="btn" id="chooseBtn" type="button">Choose video</button><div class="filename" id="fileName"></div></div></div>
+<div class="drop"><div><div class="upload-icon">↑</div><strong>Bring your footage</strong><small>MP4, MOV, M4V, WEBM, MKV · 10-minute source maximum · host/proxy limits apply</small><input id="videoFile" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v" hidden><button class="btn" id="chooseBtn" type="button">Choose video</button><div class="filename" id="fileName"></div></div></div>
 <video id="preview" class="preview" controls playsinline></video>
 <div class="actions"><button class="btn" id="uploadBtn" type="button" disabled>Upload &amp; validate</button><button class="btn secondary" id="analyzeBtn" type="button" disabled>Analyse scenes</button></div>
 <div class="result" id="uploadResult" role="status" aria-live="polite"></div><div class="result" id="analysisResult"></div><section class="timeline-wrap" id="timelineWorkspace" aria-labelledby="timelineTitle">
-<div class="timeline-head"><div><h2 id="timelineTitle">04 / Editing timeline <span class="badge">Foundation</span></h2><p class="sub" style="margin:5px 0 0">Split, trim, reorder and preview sections of your uploaded source.</p></div><strong id="timelineDuration" style="font-size:11px;color:var(--gold)">Waiting for upload</strong></div>
+<div class="timeline-head"><div><h2 id="timelineTitle">04 / Editing timeline <span class="badge">Beta</span></h2><p class="sub" style="margin:5px 0 0">Split, trim, reorder and preview sections of your uploaded source.</p></div><strong id="timelineDuration" style="font-size:11px;color:var(--gold)">Waiting for upload</strong></div>
 <div class="timeline-ruler"><span>00:00</span><span id="timelineMid">—</span><span id="timelineEnd">—</span></div>
 <div class="timeline-lane" id="timelineLane"><div class="timeline-empty">Upload and validate a video to create your first timeline clip.</div></div>
 <div class="timeline-controls"><button class="btn secondary" id="splitClipBtn" type="button" disabled>Split at playhead</button><button class="btn secondary" id="addPlayheadBtn" type="button" disabled>Go to playhead</button><button class="btn secondary" id="resetTimelineBtn" type="button" disabled>Reset timeline</button></div>
 <div class="clip-list" id="timelineClipList"><div class="timeline-empty">Your clips will appear here.</div></div>
-<div class="timeline-disclaimer">Timeline foundation: edits here are currently a local, editable plan and preview navigation aid. The existing MP4 export still uses the original start/end trim controls above; it does not yet render split/reordered timeline clips. Do not treat this as a finished non-linear editor.</div>
+<div class="timeline-disclaimer">Timeline export now renders the edited clip order from one source video, including trims, splits, reordering and deletion. It supports up to 12 segments and 10 minutes total with hard cuts. Multiple source files, independent audio/video tracks, transitions and keyframes are not supported yet.</div>
 </section>
 <div class="notice" id="apiStatus">Checking backend status…</div>
 <hr class="section-divider">
@@ -52,7 +52,7 @@
 <div class="field"><label for="subtitleColor">Subtitle color</label><select id="subtitleColor"><option value="white" selected>White</option><option value="yellow">Yellow</option></select></div>
 </div>
 <div class="ratio-hint" id="sourceRatioHint">Source dimensions and aspect ratio will be detected automatically after upload. Your selected export ratio can be changed before rendering.</div><div class="actions"><button class="btn" id="exportBtn" type="button">Review export settings</button></div><div class="result" id="exportResult" role="status" aria-live="polite"></div>
-<div class="notice">Render safety limit: source videos up to 3 minutes and exports up to 5 minutes on this starter service. You can now apply a color look, fade in/out and adjust original audio volume. AI scene decisions, captions, music generation, voice and upscaling are still not included. Export files on free hosting may disappear after a restart.</div>
+<div class="notice">Source and timeline export limits are 10 minutes. Timeline exports support up to 12 ordered segments from one source with hard cuts; multiple tracks and transitions are not available yet. Host CPU, memory, disk and request limits still apply. AI scene decisions, speech recognition, music generation, voice and upscaling are not included.</div>
 </div>
 <aside class="panel"><h2>Studio roadmap</h2><p class="sub">A staged build toward professional creator workflows. “Planned” means not yet active.</p>
 <div class="features">
