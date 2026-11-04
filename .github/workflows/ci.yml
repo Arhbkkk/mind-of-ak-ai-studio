@@ -39,3 +39,8 @@ jobs:
         run: npm install
       - name: Generate Cloudflare bindings and type-check
         run: npx wrangler types && npx tsc --noEmit
+      - name: Check browser JavaScript syntax
+        run: |
+          node --check web/local-storage.js
+          python -c "from pathlib import Path; import re; html=Path('web/index.html').read_text(); scripts=re.findall(r'<script>(.*?)</script>', html, re.S); assert len(scripts)==1, 'Expected one inline app script'; Path('/tmp/mind-of-ak-inline.js').write_text(scripts[0])"
+          node --check /tmp/mind-of-ak-inline.js
