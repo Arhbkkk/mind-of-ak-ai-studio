@@ -72,9 +72,10 @@ For the full queue/worker setup, use `docker compose up --build` and open `http:
 - `JOB_RETENTION_DAYS`: retain completed/failed queue records for this many days (default 7).
 - `MAX_RENDER_EDGE`: maximum output long edge in pixels (default 640; increase only on a host with enough memory).
 
-## AWS deployment
+## Cloudflare deployment
 
-See [deploy/aws/README.md](deploy/aws/README.md) and [docker-compose.yml](docker-compose.yml). The Compose setup keeps the API bound to localhost and runs a separate worker with persistent shared storage. Public exposure is intentionally not enabled because authentication and TLS are not implemented.
+See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The Cloudflare starter uses a Worker for routing/static assets and a Cloudflare Container for the existing FastAPI + FFmpeg application. Containers require the Workers Paid plan; this is not a zero-cost deployment. Durable R2 media storage and authentication remain required before public production.
+
 
 ## Deployment and safety notes
 
