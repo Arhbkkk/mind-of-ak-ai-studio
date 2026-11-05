@@ -2,17 +2,44 @@
 
 Mind of AK AI Studio is a browser-based creator workspace being developed in stages. This repository contains video upload/validation, FFmpeg scene-change analysis, a durable single-host render queue, basic MP4 export, and optional SRT subtitle burn-in. It is **not yet a complete AI editor**.
 
+## Owner-only access and project APIs (in development)
+
+This branch adds fail-closed HTTP Basic owner authentication at both the Cloudflare Worker edge and FastAPI backend. Set the same `OWNER_PASSWORD` as a Worker secret and in the Render environment; `OWNER_USERNAME` defaults to `owner`. The password must be strong, unique, and stored only in secret settings. The public health endpoint remains available to the host. If the password is not configured, protected routes return HTTP 503 rather than opening the studio.
+
+Authenticated project endpoints are implemented in this branch:
+- `GET /api/projects` — list project summaries.
+- `POST /api/projects` — create a project for one of the three creator profiles.
+- `GET /api/projects/{id}` — load a project manifest.
+- `PUT /api/projects/{id}` — update project content and timeline JSON.
+- `DELETE /api/projects/{id}` — delete a project manifest.
+
+Project manifests use the object-storage adapter. Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` for Cloudflare R2. Without cloud storage configuration, the local adapter is used for development and is ephemeral on hosted free instances. The project APIs do not yet upload project media assets or generated files.
+
+## Owner workspace and project gallery
+
+The owner-only project workspace is now wired into the website UI and backend:
+- Fail-closed HTTP Basic access for the studio and all non-health routes.
+- Same-origin checks for state-changing requests, with an explicit allowlist for the Cloudflare Worker frontend.
+- Project gallery UI to create, open, edit, save, refresh, and delete project manifests.
+- Three creator profiles: `mind-of-ak`, `kids-stories`, and `mind-relax-bgm`.
+- Project manifests persist through a provider-neutral object-store interface. Cloudflare R2 is selected when the `R2_*` variables are configured; local storage is only a development fallback.
+
+Before deploying this branch, set the same `OWNER_PASSWORD` as a Cloudflare Worker secret and in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub or a Wrangler vars file. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
+
+The gallery persists project manifests, script/notes, subtitles and timeline JSON. Source videos can upload directly to R2 and completed MP4 exports are stored in the saved/ prefix when R2 is configured. The gallery can attach and reopen one source video per project, preserve its timeline, and show saved render history. Multiple source files and generated assets remain in progress. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
+
 ## Current features
 
 - Responsive dark-glass and gold interface.
 - Upload video files in MP4, MOV, M4V, WEBM, or MKV format.
-- Server-side file size limit via `MAX_UPLOAD_MB` (default 2048 MB / 2 GB; deployment memory, request limits, disk and proxy settings can impose lower limits).
+- Direct multipart source uploads to Cloudflare R2 in 8 MiB chunks when configured, with a separate `MAX_DIRECT_UPLOAD_MB` cap (default 512 MB); backend-proxy fallback remains available when R2 is not configured.
 - Validate that an upload contains a readable video stream using FFprobe.
 - Read duration, resolution, codec, frame rate, and audio-stream presence.
 - Find visual scene-change candidates using FFmpeg's scene-change filter. This is visual-change detection, not semantic AI scene understanding.
 - Export an MP4 with original, vertical 9:16, or square framing.
 - Choose high, balanced, or smaller-file export quality.
-- Trim a clip by start/end seconds; this starter limits each export to 5 minutes.
+- Edit a single-source timeline with split, trim, reorder and delete controls; export up to 12 ordered segments with hard cuts and a 10-minute combined limit.
+- Trim a clip by start/end seconds; source and render duration are limited to 10 minutes, subject to hosting resource limits.
 - Download the rendered MP4 to the user's device.
 - Save an edit brief in the current browser using local storage (not sent to an AI provider).
 - Evidence-based validation API for video stream metadata, SRT syntax/timing, subtitle overlap and duration bounds, and optional supplied-script/transcript text comparison.
@@ -20,12 +47,14 @@ Mind of AK AI Studio is a browser-based creator workspace being developed in sta
 ## Not implemented yet
 
 - AI prompt-to-edit and automatic scene-by-scene directing.
-- Automatic highlight selection, beat matching, transitions, and gaming montage.
+- Multi-source, multi-track timeline editing, transitions, keyframes, and audio ducking. The current timeline renderer only supports one source and hard cuts.
+- Automatic highlight selection, beat matching, and gaming montage.
 - Automatic captions/transcription, including Tamil-English code-switching. Speech recognition is not integrated; audio/script matching remains `NOT_VERIFIED` unless a transcript is supplied by a separate trusted ASR step.
 - Tamil/English TTS, original music, sleep ambience, and kids' story narration.
 - AI asset search and licensing verification, generated diagrams, puzzle drawings, or B-roll insertion.
 - Natural denoise, stabilization, color grading, super-resolution/upscaling, or any guarantee of increased source detail.
-- Voice Studio, Style DNA, project accounts, cloud project persistence, or collaborative editing.
+- Multi-source, multi-track timeline editing, transitions, keyframes and audio ducking. The current timeline renderer only supports one source and hard cuts.
+- Full project-media library linking, generated asset management, collaborative editing and multi-user accounts.
 
 The roadmap takes inspiration from professional editing workflows (timeline control, precise trimming, audio mixing, color management, captions, proxy workflows, and export presets) without copying proprietary source code, brand assets, or protected UI designs from other products.
 

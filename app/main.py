@@ -11,12 +11,15 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt
+from app.validation import compare_script_to_transcript, validate_subtitles, parse_srt, validate_timeline_segments
 from app.subtitles import build_subtitle_filter
 from app import job_store
+from app.auth import install_owner_gate
+from app.storage import ProjectRepository, StorageError, build_object_store
+from app import r2_storage
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -52,6 +55,8 @@ def cleanup_old_files() -> None:
 cleanup_old_files()
 
 app = FastAPI(title="Mind of AK AI Studio", version="0.5.0")
+install_owner_gate(app)
+project_repository = ProjectRepository(build_object_store())
 job_store.init_db()
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
@@ -61,6 +66,11 @@ def safe_upload(name: str) -> Path:
     if Path(name).name != name or not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", name):
         raise HTTPException(status_code=400, detail="Invalid uploaded file reference.")
     path = UPLOAD_DIR / name
+    if not path.is_file() and r2_storage.configured():
+        try:
+            r2_storage.ensure_local(name, path)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Uploaded source was not found in temporary R2 storage.") from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Uploaded source was not found. It may have expired after a host restart.")
     return path
@@ -100,7 +110,241 @@ async def health() -> dict:
         "max_render_edge": MAX_RENDER_EDGE,
         "pipeline_version": "0.5.0",
         "validation_endpoint": "/api/validate",
+        "project_storage": "r2" if os.getenv("R2_BUCKET") else ("s3" if os.getenv("S3_BUCKET") else "local_ephemeral"),
     }
+
+
+@app.get("/api/projects")
+async def list_projects() -> dict:
+    projects = project_repository.list()
+    return {"projects": [
+        {key: project.get(key) for key in ("id", "title", "channel", "status", "created_at", "updated_at")}
+        for project in projects
+    ]}
+
+
+@app.post("/api/projects")
+async def create_project(payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.create(
+            payload.get("title", ""),
+            payload.get("channel", ""),
+            payload.get("settings"),
+        )
+    except (ValueError, StorageError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True, "project": project}
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str) -> dict:
+    try:
+        return {"project": project_repository.get(project_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/projects/{project_id}/media")
+async def attach_project_media(project_id: str, payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.get(project_id)
+        if not r2_storage.configured():
+            raise HTTPException(status_code=503, detail="Durable project media requires Cloudflare R2 configuration.")
+        stored_name = str(payload.get("stored_name", ""))
+        if not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", stored_name):
+            raise ValueError("Invalid source media reference.")
+        object_key = r2_storage.promote_source(stored_name, project_id)
+        entry = {
+            "stored_name": stored_name,
+            "object_key": object_key,
+            "filename": str(payload.get("filename", "source-video"))[:180],
+            "size_bytes": max(0, int(payload.get("size_bytes", 0))),
+            "duration_seconds": max(0.0, float(payload.get("duration_seconds", 0))),
+            "width": max(0, int(payload.get("width", 0))),
+            "height": max(0, int(payload.get("height", 0))),
+        }
+        media = project.setdefault("source_media", [])
+        media[:] = [item for item in media if item.get("stored_name") != stored_name]
+        media.append(entry)
+        project_repository.save(project)
+        return {"ok": True, "project": project, "media": entry}
+    except HTTPException:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not attach source media to this project.") from exc
+
+
+@app.get("/api/projects/{project_id}/media/{stored_name}")
+async def get_project_media(project_id: str, stored_name: str):
+    try:
+        project = project_repository.get(project_id)
+        if not any(item.get("stored_name") == stored_name for item in project.get("source_media", [])):
+            raise HTTPException(status_code=404, detail="This media file is not attached to the selected project.")
+        if r2_storage.configured():
+            url = r2_storage.presign_project_source(project_id, stored_name, expires_in=900)
+            return RedirectResponse(url, status_code=307)
+        path = safe_upload(stored_name)
+        return FileResponse(path, media_type="video/mp4")
+    except HTTPException:
+        raise
+    except (ValueError, StorageError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail="Project source media was not found.") from exc
+
+
+@app.put("/api/projects/{project_id}")
+async def update_project(project_id: str, payload: dict = Body(...)) -> dict:
+    try:
+        project = project_repository.get(project_id)
+        allowed = {"title", "channel", "status", "settings", "assets", "timeline", "script", "subtitles", "story_parts", "export_settings"}
+        for key in allowed:
+            if key in payload:
+                project[key] = payload[key]
+        if not isinstance(project.get("title"), str) or not project["title"].strip() or len(project["title"]) > 120:
+            raise ValueError("Project title must contain 1 to 120 characters.")
+        if project.get("status") not in {"draft", "ready", "rendering", "completed", "failed"}:
+            raise ValueError("Invalid project status.")
+        if not isinstance(project.get("settings"), dict) or not isinstance(project.get("assets"), list):
+            raise ValueError("Project settings and assets must be objects/lists.")
+        if not isinstance(project.get("timeline"), dict) or not isinstance(project.get("story_parts"), list):
+            raise ValueError("Project timeline and story parts have invalid shapes.")
+        if not isinstance(project.get("script", ""), str) or not isinstance(project.get("subtitles", ""), str):
+            raise ValueError("Project script and subtitles must be text.")
+        project_repository.save(project)
+        return {"ok": True, "project": project}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str) -> dict:
+    try:
+        project = project_repository.get(project_id)
+        if r2_storage.configured():
+            for item in project.get("source_media", []):
+                r2_storage.delete_project_source(project_id, str(item.get("stored_name", "")))
+        project_repository.delete(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except StorageError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not delete all project data safely.") from exc
+    return {"ok": True, "deleted": project_id}
+
+
+@app.get("/api/storage/status")
+async def storage_status() -> dict:
+    enabled = r2_storage.configured()
+    return {
+        "enabled": enabled,
+        "provider": "Cloudflare R2" if enabled else None,
+        "upload_mode": "direct-multipart" if enabled else "backend-proxy",
+    }
+
+
+@app.post("/api/storage/multipart/initiate")
+async def storage_multipart_initiate(request: Request) -> dict:
+    if not r2_storage.configured():
+        raise HTTPException(status_code=503, detail="R2 storage is not configured.")
+    try:
+        data = await request.json()
+        result = r2_storage.begin_upload(
+            str(data.get("filename", "")),
+            str(data.get("content_type", "application/octet-stream")),
+            int(data.get("size_bytes", 0)),
+        )
+        return {"ok": True, **result}
+    except ValueError as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not start direct storage upload.") from exc
+
+
+@app.post("/api/storage/multipart/sign-part")
+async def storage_multipart_sign_part(request: Request) -> dict:
+    try:
+        data = await request.json()
+        url = r2_storage.sign_part(
+            str(data.get("object_key", "")),
+            str(data.get("upload_id", "")),
+            int(data.get("part_number", 0)),
+        )
+        return {"ok": True, "url": url}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not sign upload part.") from exc
+
+
+@app.post("/api/storage/multipart/complete")
+async def storage_multipart_complete(request: Request) -> dict:
+    try:
+        data = await request.json()
+        name = str(data.get("stored_as", ""))
+        if not re.fullmatch(r"[a-f0-9]{32}\.(mp4|mov|m4v|webm|mkv)", name):
+            raise ValueError("Invalid uploaded file reference.")
+        key = str(data.get("object_key", ""))
+        if key != f"temporary/{name}":
+            raise ValueError("Upload object key does not match the generated file reference.")
+        destination = UPLOAD_DIR / name
+        total = r2_storage.complete_upload(
+            key, str(data.get("upload_id", "")), data.get("parts", []), destination
+        )
+        probe = await run_command([
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,r_frame_rate,duration",
+            "-show_entries", "format=duration,format_name", "-of", "json", str(destination)
+        ], timeout=45)
+        if probe.returncode != 0:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=415, detail="The uploaded file could not be read as a valid video.")
+        metadata = json.loads(probe.stdout)
+        streams = metadata.get("streams", [])
+        if not streams:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=415, detail="No video stream was found in this file.")
+        stream = streams[0]
+        duration = float(stream.get("duration") or metadata.get("format", {}).get("duration") or 0)
+        if duration <= 0 or duration > MAX_SOURCE_DURATION_SECONDS:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Video duration must be between 1 and {MAX_SOURCE_DURATION_SECONDS} seconds.",
+            )
+        return {
+            "ok": True,
+            "message": "Video uploaded to R2 and validated.",
+            "stored_as": name,
+            "size_bytes": total,
+            "duration_seconds": round(duration, 3),
+            "width": stream.get("width"),
+            "height": stream.get("height"),
+            "video_codec": stream.get("codec_name"),
+            "frame_rate": stream.get("r_frame_rate"),
+            "storage": "Cloudflare R2",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not complete or validate the R2 upload. Retry the upload.") from exc
+
+
+@app.post("/api/storage/multipart/abort")
+async def storage_multipart_abort(request: Request) -> dict:
+    try:
+        data = await request.json()
+        r2_storage.abort_upload(str(data.get("object_key", "")), str(data.get("upload_id", "")))
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not abort the incomplete upload.") from exc
 
 
 @app.post("/api/upload")
@@ -283,6 +527,7 @@ async def _render_export_now(
     subtitle_size: int = Form(36),
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
+    persist_export: bool = True,
 ) -> dict:
     source = safe_upload(stored_name)
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
@@ -434,6 +679,14 @@ async def _render_export_now(
         output.unlink(missing_ok=True)
         detail = (result.stderr or "Unknown FFmpeg error")[-1200:]
         raise HTTPException(status_code=422, detail=f"Export failed: {detail}")
+    durable_storage = False
+    if persist_export and r2_storage.configured():
+        try:
+            r2_storage.save_export(output_name, output)
+            durable_storage = True
+        except Exception as exc:
+            output.unlink(missing_ok=True)
+            raise HTTPException(status_code=502, detail="Render completed but saving the export to R2 failed. The export was not marked as saved.") from exc
     cleanup_old_files()
     return {
         "ok": True,
@@ -451,9 +704,164 @@ async def _render_export_now(
         "fade_seconds": fade_seconds,
         "audio_volume": audio_volume,
         "subtitles_burned_in": bool(subtitle_srt.strip()),
+        "durable_storage": durable_storage,
         "message": "Export completed with framing, color look, optional fades, audio volume and optional burned-in SRT subtitles. AI-directed editing is not included yet.",
     }
 
+
+
+def _srt_timestamp(seconds: float) -> str:
+    millis = max(0, int(round(seconds * 1000)))
+    hours, remainder = divmod(millis, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    whole_seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{whole_seconds:02d},{milliseconds:03d}"
+
+
+def _slice_srt_for_source_range(srt_text: str, source_start: float, source_end: float) -> str:
+    """Clip source-relative subtitle cues and remap them to one timeline segment."""
+    if not srt_text.strip():
+        return ""
+    output = []
+    for cue in parse_srt(srt_text):
+        start = max(cue["start_seconds"], source_start)
+        end = min(cue["end_seconds"], source_end)
+        if end <= start:
+            continue
+        output.append(
+            f"{len(output) + 1}\n{_srt_timestamp(start - source_start)} --> "
+            f"{_srt_timestamp(end - source_start)}\n{cue['text']}"
+        )
+    return "\n\n".join(output)
+
+
+async def _render_timeline_now(
+    stored_name: str,
+    segments: list[dict],
+    preset: str,
+    framing: str,
+    resolution: str,
+    quality: str,
+    color_style: str,
+    fade_seconds: float,
+    audio_volume: float,
+    subtitle_srt: str,
+    subtitle_size: int,
+    subtitle_position: str,
+    subtitle_color: str,
+) -> dict:
+    """Render ordered ranges from one source and concatenate their MP4 outputs."""
+    source = safe_upload(stored_name)
+    probe = await run_command([
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(source)
+    ], timeout=20)
+    try:
+        source_duration = float(probe.stdout.strip())
+        ranges = validate_timeline_segments(segments, source_duration)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid timeline: {exc}") from exc
+
+    parts: list[Path] = []
+    concat_file = EXPORT_DIR / f"ak_concat_{uuid.uuid4().hex}.txt"
+    final_name = f"ak_export_{uuid.uuid4().hex}.mp4"
+    final_path = EXPORT_DIR / final_name
+    completed = False
+    try:
+        for start, end in ranges:
+            part_srt = _slice_srt_for_source_range(subtitle_srt, start, end)
+            part = await _render_export_now(
+                stored_name=stored_name,
+                preset=preset,
+                framing=framing,
+                resolution=resolution,
+                quality=quality,
+                start_seconds=start,
+                end_seconds=end,
+                color_style=color_style,
+                fade_seconds=fade_seconds,
+                audio_volume=audio_volume,
+                subtitle_srt=part_srt,
+                subtitle_size=subtitle_size,
+                subtitle_position=subtitle_position,
+                subtitle_color=subtitle_color,
+                persist_export=False,
+            )
+            parts.append(EXPORT_DIR / part["filename"])
+
+        concat_file.write_text(
+            "".join("file '" + str(path).replace("'", "'\\''") + "'\n" for path in parts),
+            encoding="utf-8",
+        )
+        joined = await run_command([
+            "ffmpeg", "-hide_banner", "-threads", "1", "-f", "concat",
+            "-safe", "0", "-i", str(concat_file), "-c", "copy",
+            "-movflags", "+faststart", "-y", str(final_path)
+        ], timeout=240)
+        if joined.returncode != 0 or not final_path.is_file() or final_path.stat().st_size == 0:
+            raise HTTPException(status_code=422, detail="Timeline concatenation failed: " + (joined.stderr or "")[-1000:])
+
+        verify = await run_command([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-show_entries", "stream=width,height", "-of", "json", str(final_path)
+        ], timeout=20)
+        if verify.returncode != 0:
+            raise HTTPException(status_code=422, detail="Could not verify the timeline export.")
+        metadata = json.loads(verify.stdout)
+        video = next((item for item in metadata.get("streams", []) if item.get("codec_type") == "video"), {})
+        duration = float(metadata.get("format", {}).get("duration") or 0)
+        if duration <= 0 or not video:
+            raise HTTPException(status_code=422, detail="Timeline export is missing a valid video stream.")
+        durable_storage = False
+        if r2_storage.configured():
+            try:
+                r2_storage.save_export(final_name, final_path)
+                durable_storage = True
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail="Timeline rendered but durable R2 storage failed.") from exc
+        cleanup_old_files()
+        completed = True
+        return {
+            "ok": True,
+            "filename": final_name,
+            "download_url": f"/api/download/{final_name}",
+            "size_bytes": final_path.stat().st_size,
+            "duration_seconds": round(duration, 2),
+            "preset": preset,
+            "framing": framing,
+            "resolution": resolution,
+            "output_width": video.get("width"),
+            "output_height": video.get("height"),
+            "quality": quality,
+            "color_style": color_style,
+            "timeline_clips": len(ranges),
+            "subtitles_burned_in": bool(subtitle_srt.strip()),
+            "durable_storage": durable_storage,
+            "message": "Ordered timeline clips rendered and joined with hard cuts. Transitions and multiple source files are not supported yet.",
+        }
+    finally:
+        concat_file.unlink(missing_ok=True)
+        for part in parts:
+            part.unlink(missing_ok=True)
+        if not completed:
+            final_path.unlink(missing_ok=True)
+
+
+def record_project_export(project_id: str, result: dict) -> bool:
+    if not project_id:
+        return False
+    project = project_repository.get(project_id)
+    history = project.setdefault("render_history", [])
+    history.append({
+        "filename": result.get("filename"),
+        "duration_seconds": result.get("duration_seconds"),
+        "size_bytes": result.get("size_bytes"),
+        "durable_storage": bool(result.get("durable_storage")),
+        "created_at": time.time(),
+    })
+    project["render_history"] = history[-50:]
+    project_repository.save(project)
+    return True
 
 
 # Render jobs persist in SQLite; a separate worker executes FFmpeg.
@@ -473,7 +881,14 @@ async def start_export(
     subtitle_size: int = Form(36),
     subtitle_position: Literal["bottom", "middle", "top"] = Form("bottom"),
     subtitle_color: Literal["white", "yellow"] = Form("white"),
+    timeline_json: str = Form(""),
+    project_id: str = Form(""),
 ) -> dict:
+    if project_id:
+        try:
+            project_repository.get(project_id)
+        except (ValueError, StorageError) as exc:
+            raise HTTPException(status_code=404, detail="Project not found for this export.") from exc
     if not 20 <= subtitle_size <= 64:
         raise HTTPException(status_code=422, detail="Subtitle font size must be between 20 and 64.")
     if len(subtitle_srt.encode("utf-8")) > 1_000_000:
@@ -485,7 +900,23 @@ async def start_export(
                 raise ValueError("Subtitle files may contain at most 2,000 cues.")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=f"Invalid SRT subtitles: {exc}") from exc
-    safe_upload(stored_name)
+    source = safe_upload(stored_name)
+    timeline_segments = None
+    if len(timeline_json.encode("utf-8")) > 20_000:
+        raise HTTPException(status_code=413, detail="Timeline data exceeds the 20 KB limit.")
+    if timeline_json.strip():
+        try:
+            timeline_segments = json.loads(timeline_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Timeline data must be valid JSON.") from exc
+        probe = await run_command([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(source)
+        ], timeout=20)
+        try:
+            validate_timeline_segments(timeline_segments, float(probe.stdout.strip()))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid timeline: {exc}") from exc
     payload = {
         "stored_name": stored_name, "preset": preset, "framing": framing,
         "resolution": resolution, "quality": quality,
@@ -496,7 +927,10 @@ async def start_export(
         "subtitle_size": subtitle_size,
         "subtitle_position": subtitle_position,
         "subtitle_color": subtitle_color,
+        "project_id": project_id,
     }
+    if timeline_segments is not None:
+        payload["timeline_segments"] = timeline_segments
     try:
         job_id = job_store.enqueue(payload, max_active=5)
     except RuntimeError as exc:
@@ -527,6 +961,12 @@ async def export_status(job_id: str) -> dict:
 async def download_export(filename: str) -> FileResponse:
     if Path(filename).name != filename or not re.fullmatch(r"ak_export_[a-f0-9]{32}\.mp4", filename):
         raise HTTPException(status_code=400, detail="Invalid export reference.")
+    if r2_storage.configured():
+        try:
+            url = r2_storage.presign_saved_export(filename, expires_in=900)
+            return RedirectResponse(url, status_code=307)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="Saved export was not found in R2.") from exc
     path = EXPORT_DIR / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export not found. It may have expired after a host restart.")
