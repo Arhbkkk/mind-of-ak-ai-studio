@@ -40,6 +40,17 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
+    // Public, value-free diagnostic: confirms which Worker environment bindings
+    // are present without exposing credentials or other secret material.
+    if (url.pathname === "/api/worker-status") {
+      return Response.json({
+        worker: "mind-of-ak-ai-studio",
+        owner_username_configured: Boolean(env.OWNER_USERNAME),
+        owner_password_configured: Boolean(env.OWNER_PASSWORD),
+        api_origin_configured: Boolean(env.API_ORIGIN),
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
+
     // Protect both the static application and API proxy. Store OWNER_PASSWORD
     // as a Worker secret; never commit it to this repository.
     if (url.pathname !== "/api/health" && !authorized(request, env)) {
