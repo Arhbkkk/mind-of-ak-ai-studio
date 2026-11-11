@@ -22,6 +22,6 @@ services:
       - key: OWNER_PASSWORD
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://mind-of-ak-ai-studio.ammappalub.workers.dev,https://mind-of-ak-ai-studio.onrender.com
+        value: https://mind-of-ak-ai-studio.ammaappalub.workers.dev
       - key: MAX_DIRECT_UPLOAD_MB
         value: "512"
