@@ -111,7 +111,7 @@ See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The frontend is 
 - FFmpeg renders run in a separate worker, but the queue is SQLite-backed and designed for one host/one worker only. It is not a distributed production queue. Long renders may still consume substantial CPU, memory and disk. The Render blueprint sets a 512 MB application upload limit, but this does not guarantee that the host or reverse proxy accepts files of that size. The free service has limited CPU, memory and ephemeral disk.
 - Files in `/tmp` are ephemeral. A host restart or redeploy can remove sources and exports.
 - Owner-only HTTP Basic authentication is implemented, but this is a single-owner workspace, not a multi-user account system. Keep credentials private and do not treat the app as a multi-tenant service.
-- Before public production, add authentication, per-user project isolation, private object storage, distributed job orchestration, accurate FFmpeg progress, stronger quotas/rate limits, and monitoring.
+- Before broader public production, add a real multi-user identity and per-user project isolation model, stronger quotas/rate limits, distributed job orchestration, accurate FFmpeg progress, and monitoring. Owner-only HTTP Basic authentication is already implemented; it is not a substitute for multi-user authorization.
 - AI model keys must stay server-side. Any future voice/music/assets feature must respect provider terms and the relevant licences. Do not promise copyright safety without verifying asset rights.
 - Video quality enhancement can improve perceived quality in suitable cases, but it cannot reliably recover details absent from the source. Keep enhancement optional and avoid synthetic-looking faces/textures.
 
