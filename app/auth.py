@@ -6,6 +6,9 @@ so direct calls to the Render origin cannot bypass the edge login.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 import os
 from functools import lru_cache
 from urllib.parse import urlsplit
@@ -17,6 +20,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 ACCESS_JWT_HEADER = "cf-access-jwt-assertion"
+
+
+def credentials_match(authorization: str | None, username: str, password: str) -> bool:
+    """Legacy comparison helper retained for existing unit tests; not an auth path."""
+    if not authorization or not authorization.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:].strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return False
+    supplied_user, separator, supplied_password = decoded.partition(":")
+    if not separator:
+        return False
+    return hmac.compare_digest(supplied_user, username) and hmac.compare_digest(supplied_password, password)
 
 
 @lru_cache(maxsize=4)
