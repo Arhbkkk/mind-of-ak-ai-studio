@@ -2,9 +2,9 @@
 
 Mind of AK AI Studio is a browser-based creator workspace being developed in stages. This repository contains video upload/validation, FFmpeg scene-change analysis, a durable single-host render queue, basic MP4 export, and optional SRT subtitle burn-in. It is **not yet a complete AI editor**.
 
-## Owner-only access and project APIs (in development)
+## Cloudflare Access and protected project APIs
 
-This branch adds fail-closed HTTP Basic owner authentication at both the Cloudflare Worker edge and FastAPI backend. Set the same `OWNER_PASSWORD` as a Worker secret and in the Render environment; `OWNER_USERNAME` defaults to `owner`. The password must be strong, unique, and stored only in secret settings. The public health endpoint remains available to the host. If the password is not configured, protected routes return HTTP 503 rather than opening the studio.
+The production Worker is protected by Cloudflare Access for all traffic. Only members of the configured Cloudflare account are allowed, with a 24-hour Access session. The Worker forwards Cloudflare's signed `Cf-Access-Jwt-Assertion` header to FastAPI. The API independently verifies the JWT signature against the account's Access signing keys and checks the issuer, expiry, and application audience. Direct requests to the Render origin therefore cannot bypass the Cloudflare login. Configure `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in the Render environment. `/api/health` remains public for host health checks; other API routes fail closed when Access is missing or invalid.
 
 Authenticated project endpoints are implemented in this branch:
 - `GET /api/projects` — list project summaries.
@@ -18,13 +18,13 @@ Project manifests use the object-storage adapter. Configure `R2_ACCOUNT_ID`, `R2
 ## Owner workspace and project gallery
 
 The owner-only project workspace is now wired into the website UI and backend:
-- Fail-closed HTTP Basic access for the studio and all non-health routes.
+- Cloudflare Access at the Worker edge plus independently verified Access JWTs on all non-health API routes.
 - Same-origin checks for state-changing requests, with an explicit allowlist for the Cloudflare Worker frontend.
 - Project gallery UI to create, open, edit, save, refresh, and delete project manifests.
 - Three creator profiles: `mind-of-ak`, `kids-stories`, and `mind-relax-bgm`.
 - Project manifests persist through a provider-neutral object-store interface. Cloudflare R2 is selected when the `R2_*` variables are configured; local storage is only a development fallback.
 
-Before deploying this branch, set the same `OWNER_PASSWORD` as a Cloudflare Worker secret and in Render. The value is intentionally marked `sync: false` in `render.yaml`; do not place it in GitHub or a Wrangler vars file. Set `ALLOWED_ORIGINS` to the exact public website origin(s). R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
+Before deploying, set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in Render to the Cloudflare Access team domain and this application's audience tag. Set `ALLOWED_ORIGINS` to the exact public website origin(s). Do not add a separate owner password; Cloudflare Access handles the interactive sign-in. R2 project persistence requires the R2 account ID, bucket, access key and secret key in the Render environment. The Worker protects static assets and proxies the Authorization header to the independently protected backend. The public `/api/health` endpoint remains available for host health checks.
 
 The gallery persists project manifests, script/notes, subtitles and timeline JSON. Source videos can upload directly to R2 and completed MP4 exports are stored in the saved/ prefix when R2 is configured. The gallery can attach and reopen one source video per project, preserve its timeline, and show saved render history. Multiple source files and generated assets remain in progress. The editing timeline supports ordered segments from one source video, not multiple independent tracks. Local fallback storage on Render is ephemeral.
 
@@ -110,7 +110,7 @@ See [deploy/cloudflare/README.md](deploy/cloudflare/README.md). The frontend is 
 
 - FFmpeg renders run in a separate worker, but the queue is SQLite-backed and designed for one host/one worker only. It is not a distributed production queue. Long renders may still consume substantial CPU, memory and disk. The 2 GB upload default is only an application-level limit and does not guarantee that the host or reverse proxy accepts files that large.
 - Files in `/tmp` are ephemeral. A host restart or redeploy can remove sources and exports.
-- There is no authentication or per-user project isolation yet. Do not upload confidential or sensitive footage to this public demo.
+- The studio uses a single Cloudflare-account-member access policy rather than separate user workspaces. Do not upload confidential or sensitive footage unless the storage and retention configuration meets your requirements.
 - Before public production, add authentication, per-user project isolation, private object storage, distributed job orchestration, accurate FFmpeg progress, stronger quotas/rate limits, and monitoring.
 - AI model keys must stay server-side. Any future voice/music/assets feature must respect provider terms and the relevant licences. Do not promise copyright safety without verifying asset rights.
 - Video quality enhancement can improve perceived quality in suitable cases, but it cannot reliably recover details absent from the source. Keep enhancement optional and avoid synthetic-looking faces/textures.
