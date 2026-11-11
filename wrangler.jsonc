@@ -13,8 +13,5 @@
       "/api/*"
     ]
   },
-  "vars": {
-    "API_ORIGIN": "https://mind-of-ak-api.onrender.com"
-  },
   "previews": {}
 }
