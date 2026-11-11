@@ -12,16 +12,16 @@ This is a free-first prototype, not a production media platform.
 
 - Render free web services can spin down after inactivity and take time to wake.
 - The free service has an ephemeral filesystem. Uploaded videos, exports and SQLite job state can disappear after restarts/redeploys. Do not treat it as durable storage.
-- Free compute has limited memory/CPU. The blueprint limits uploads to 50 MB, source duration to 180 seconds and output long edge to 640 pixels. FFmpeg may still fail on some videos.
+- Free compute has limited memory/CPU and ephemeral disk. The checked-in Render blueprint sets an application upload limit of 512 MB, a maximum source duration of 600 seconds, and an output long edge of 640 pixels. These are application settings, not guarantees that every upload or render will fit the host's resource limits.
 - The Render service may have monthly usage limits or plan changes. Check the current Render dashboard before deploying.
 - Cloudflare Worker Static Assets and the API proxy do not require Cloudflare Containers. This configuration removes the paid Container binding.
-- No authentication or per-user project isolation is implemented. Do not upload confidential or sensitive footage to this public prototype.
+- Owner-only HTTP Basic authentication is implemented at the Worker and API. This is a single-owner workspace, not a multi-user account system. Keep credentials private and do not use it for confidential footage without an appropriate security review.
 
 ## Deploy the API on Render
 
 1. Open the Render dashboard and choose **New → Blueprint**.
 2. Connect the GitHub repository `Arhbkkk/mind-of-ak-ai-studio`.
-3. Select the branch containing this configuration, currently `feat/aws-render-foundation`.
+3. Select the `main` branch when deploying the current production configuration. If your existing Render service is already connected to another branch, verify its configured branch before changing it.
 4. Review the `mind-of-ak-api` service and confirm the plan is **Free** before applying.
 5. Let the Docker build and deploy finish.
 6. Open the service's URL and verify `/api/health` returns JSON with `"ok": true`. Save the service origin, for example `https://mind-of-ak-api.onrender.com`.
@@ -36,7 +36,13 @@ Do not add a paid instance or persistent disk for this prototype.
 4. Set its value to the Render service origin only, for example `https://mind-of-ak-api.onrender.com` (no trailing path such as `/api`).
 5. Save and redeploy the Worker if Cloudflare requests it.
 
-The frontend continues calling same-origin `/api/*`; the Worker forwards those requests to Render. No API key is placed in browser JavaScript.
+The frontend continues calling same-origin `/api/*`; the Worker forwards those requests and the Authorization header to Render, where the backend checks the owner credentials again. No owner password or API key belongs in browser JavaScript or checked-in Wrangler variables.
+
+## Required owner and storage configuration
+
+- Set `OWNER_PASSWORD` as a Worker secret and as a Render environment secret. The values must match exactly. `OWNER_USERNAME` is optional and defaults to `owner`; if set on one side, set the same value on the other.
+- Set Render `ALLOWED_ORIGINS` to the exact public Worker origin, with no path and no trailing slash. The checked-in `render.yaml` currently uses `https://mind-of-ak-ai-studio.ammaappalub.workers.dev`; confirm this is the actual production hostname before changing the Render environment.
+- For durable project manifests and media, configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_BUCKET` in Render. Without these, the local fallback is ephemeral on Render's free service.
 
 ## Verify
 
